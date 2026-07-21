@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { money, pct, platformLabel, shortTime } from "@/lib/format";
+import { SecurityPanel } from "@/components/SecurityPanel";
+import { WorkflowStudio } from "@/components/WorkflowStudio";
 import type {
   AiModel,
   AiSubscription,
@@ -21,6 +23,7 @@ import type {
 type Tab =
   | "overview"
   | "workflows"
+  | "security"
   | "analytics"
   | "features"
   | "providers"
@@ -33,7 +36,8 @@ type Tab =
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Command centre" },
-  { id: "workflows", label: "Workflows & errors" },
+  { id: "workflows", label: "Workflow studio" },
+  { id: "security", label: "Security questions" },
   { id: "analytics", label: "Analytics" },
   { id: "features", label: "Feature control" },
   { id: "providers", label: "Providers & rails" },
@@ -68,7 +72,7 @@ export function AdminShell() {
   const [devices, setDevices] = useState<DeviceStat[]>([]);
   const [regions, setRegions] = useState<RegionVolume[]>([]);
   const [hourly, setHourly] = useState<number[]>([]);
-  const [temporalUi, setTemporalUi] = useState("http://localhost:8088");
+  const [temporalConnected, setTemporalConnected] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined" && sessionStorage.getItem(AUTH_KEY) === "1") {
@@ -111,7 +115,6 @@ export function AdminShell() {
       ]);
       setOverview(ov);
       setWorkflows(wf.items || []);
-      setTemporalUi(wf.temporalUi || "http://localhost:8088");
       setFeatures(ft.items || []);
       setProviders(pr.items || []);
       setUsers(us.items || []);
@@ -123,7 +126,22 @@ export function AdminShell() {
       setDevices(an.devices || []);
       setRegions(an.regions || []);
       setHourly(an.hourlyVolume || []);
-      setActions(ac.items || []);
+      // Dedupe audit rows by id (safety if older server used Date.now() collisions)
+      const acts: AdminAction[] = ac.items || [];
+      const seen = new Set<string>();
+      setActions(
+        acts.filter((a) => {
+          if (seen.has(a.id)) return false;
+          seen.add(a.id);
+          return true;
+        }),
+      );
+      try {
+        const t = await fetch("/api/temporal?pageSize=1").then((r) => r.json());
+        setTemporalConnected(!!t.connected);
+      } catch {
+        setTemporalConnected(false);
+      }
     } catch {
       flash("Failed to load admin data");
     } finally {
@@ -309,17 +327,13 @@ export function AdminShell() {
             <span className={`pill ${overview?.live.voice ? "on" : "off"}`}>
               Voice {overview?.live.voice ? "UP" : "DOWN"}
             </span>
-            <a className="pill" href={temporalUi} target="_blank" rel="noreferrer">
-              Temporal UI ↗
-            </a>
+            <span className={`pill ${temporalConnected ? "on" : "off"}`}>
+              Temporal {temporalConnected ? "IN-DASH" : "OFF"}
+            </span>
           </div>
         </div>
 
-        {toast && (
-          <div className="card" style={{ marginBottom: 14, borderColor: "rgba(61,126,255,0.4)" }}>
-            {toast}
-          </div>
-        )}
+        {toast && <div className="card toast">{toast}</div>}
 
         {tab === "overview" && overview && (
           <>
@@ -382,6 +396,7 @@ export function AdminShell() {
                           nav_providers: "providers",
                           nav_ai: "ai",
                           nav_features: "features",
+                          nav_security: "security",
                         };
                         if (map[r.actionId]) setTab(map[r.actionId]);
                       }}
@@ -415,61 +430,14 @@ export function AdminShell() {
         )}
 
         {tab === "workflows" && (
-          <div className="card">
-            <div className="row-between" style={{ marginBottom: 12 }}>
-              <h3 style={{ margin: 0 }}>Temporal · DomesticTransferSim & activity errors</h3>
-              <a className="btn" href={temporalUi} target="_blank" rel="noreferrer">
-                Open Temporal UI
-              </a>
-            </div>
-            <p className="msg" style={{ marginBottom: 12 }}>
-              Includes production-shaped errors from sandbox workers, e.g.{" "}
-              <span className="mono">transfer-pwa_1784617797470</span> /{" "}
-              <span className="mono">PostLedgerHold</span> → 409 insufficient_funds.
-            </p>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>When</th>
-                    <th>Status</th>
-                    <th>Workflow</th>
-                    <th>Activity</th>
-                    <th>Message</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {workflows.map((w) => (
-                    <tr key={w.id}>
-                      <td className="mono">{shortTime(w.occurredAt)}</td>
-                      <td>
-                        <span className={`tag ${w.status}`}>{w.status}</span>
-                        {w.errorCode ? (
-                          <>
-                            {" "}
-                            <span className="tag error">{w.errorCode}</span>
-                          </>
-                        ) : null}
-                      </td>
-                      <td>
-                        <div className="mono">{w.workflowType}</div>
-                        <div className="msg mono" style={{ maxWidth: 220 }}>
-                          {w.workflowId}
-                        </div>
-                        <div className="msg mono">run {w.runId.slice(0, 8)}…</div>
-                      </td>
-                      <td>
-                        {w.activityType || "—"}
-                        {w.attempt ? ` · att ${w.attempt}` : ""}
-                      </td>
-                      <td className="msg">{w.message}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <WorkflowStudio
+            seeded={workflows}
+            flash={flash}
+            onRefreshSeeded={() => void loadAll()}
+          />
         )}
+
+        {tab === "security" && <SecurityPanel users={users} flash={flash} />}
 
         {tab === "analytics" && (
           <div className="grid two">
@@ -1007,8 +975,8 @@ export function AdminShell() {
                   </tr>
                 </thead>
                 <tbody>
-                  {actions.map((a) => (
-                    <tr key={a.id}>
+                  {actions.map((a, idx) => (
+                    <tr key={`${a.id}__${idx}`}>
                       <td className="mono">{shortTime(a.at)}</td>
                       <td>{a.actor}</td>
                       <td className="mono">{a.action}</td>

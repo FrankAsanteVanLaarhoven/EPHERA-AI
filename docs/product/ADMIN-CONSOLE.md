@@ -11,7 +11,8 @@ Remote control plane for the entire EPHERA Money platform:
 | Module | Capability |
 | --- | --- |
 | **Command centre** | Live service health, demo wallet, KPIs, kill switches, AI-backed recommendations |
-| **Workflows & errors** | Temporal-shaped activity failures (e.g. `PostLedgerHold` / `insufficient_funds`) |
+| **Workflow studio** | In-dashboard Temporal: live executions, event history, blueprint designer, start DomesticTransferSim (no external UI required) |
+| **Security questions** | Bank-style Q&A catalogue, issue/resolve step-up challenges |
 | **Analytics** | Devices (iOS/Android/PWA/web), regions, currency volumes, hourly intensity |
 | **Feature control** | Remote feature flags + % rollout for voice, PWA, freeze, crypto, video verify, etc. |
 | **Providers & rails** | MTN, banks, open banking, utilities, cards — status control |
@@ -62,6 +63,8 @@ The Super Admin **Command centre** and **Workflows** views surface these exact w
 All under `/api/*` on the admin app:
 
 - `GET /api/overview` · `GET /api/workflows` · `GET /api/analytics`
+- `GET /api/temporal` · `GET /api/temporal/history` · `POST /api/temporal/start`
+- `GET|POST|PATCH /api/blueprints` · `GET|POST|PATCH /api/security`
 - `GET|PATCH /api/features` · `GET|PATCH /api/providers` · `GET|PATCH /api/users`
 - `GET /api/transactions` · `GET|PATCH /api/mandates` · `GET /api/communications`
 - `GET|PATCH /api/ai` · `GET|POST /api/actions` · `GET /api/health`

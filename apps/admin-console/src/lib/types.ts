@@ -1,5 +1,49 @@
 export type Severity = "critical" | "error" | "warn" | "info" | "success";
 
+export type SecurityQuestion = {
+  id: string;
+  prompt: string;
+  category: "identity" | "device" | "transaction" | "recovery" | "ops";
+  requiredFor: string[];
+  active: boolean;
+  minAnswerLength: number;
+  createdAt: string;
+};
+
+export type SecurityChallenge = {
+  id: string;
+  userId: string;
+  userName: string;
+  questionId: string;
+  questionPrompt: string;
+  status: "pending" | "passed" | "failed" | "expired";
+  purpose: string;
+  createdAt: string;
+  resolvedAt?: string;
+};
+
+export type WorkflowStep = {
+  id: string;
+  activity: string;
+  label: string;
+  required: boolean;
+  timeoutSec: number;
+  retries: number;
+};
+
+export type WorkflowBlueprint = {
+  id: string;
+  name: string;
+  workflowType: string;
+  taskQueue: string;
+  description: string;
+  steps: WorkflowStep[];
+  version: string;
+  status: "draft" | "published" | "archived";
+  updatedAt: string;
+  createdBy: string;
+};
+
 export type FeatureFlag = {
   id: string;
   name: string;

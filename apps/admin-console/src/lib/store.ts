@@ -12,13 +12,23 @@ import type {
   Mandate,
   Provider,
   RegionVolume,
+  SecurityChallenge,
+  SecurityQuestion,
   TransactionRow,
   UserRow,
+  WorkflowBlueprint,
   WorkflowEvent,
 } from "./types";
 
 function iso(minsAgo = 0) {
   return new Date(Date.now() - minsAgo * 60_000).toISOString();
+}
+
+let idSeq = 0;
+/** Always-unique ids (avoids React key collisions when Date.now() collides). */
+export function uid(prefix: string) {
+  idSeq += 1;
+  return `${prefix}_${Date.now()}_${idSeq}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
 const featureFlags: FeatureFlag[] = [
@@ -770,12 +780,163 @@ const aiSubscriptions: AiSubscription[] = [
 
 const actions: AdminAction[] = [
   {
-    id: "act_0",
+    id: "act_bootstrap_0",
     action: "console.bootstrap",
     target: "admin-console",
     actor: "system",
     result: "Super Admin control plane initialised",
     at: iso(0),
+  },
+];
+
+const securityQuestions: SecurityQuestion[] = [
+  {
+    id: "sq_mother_maiden",
+    prompt: "What is your mother's maiden name?",
+    category: "recovery",
+    requiredFor: ["password_reset", "device_transfer"],
+    active: true,
+    minAnswerLength: 2,
+    createdAt: iso(10_000),
+  },
+  {
+    id: "sq_first_school",
+    prompt: "What was the name of your first school?",
+    category: "identity",
+    requiredFor: ["high_value_send", "unfreeze"],
+    active: true,
+    minAnswerLength: 2,
+    createdAt: iso(9_000),
+  },
+  {
+    id: "sq_city_born",
+    prompt: "In which city were you born?",
+    category: "identity",
+    requiredFor: ["kyc_step_up", "receive_verify"],
+    active: true,
+    minAnswerLength: 2,
+    createdAt: iso(8_000),
+  },
+  {
+    id: "sq_last_txn",
+    prompt: "What was the approximate amount of your last successful transfer?",
+    category: "transaction",
+    requiredFor: ["high_value_send", "card_unlock"],
+    active: true,
+    minAnswerLength: 1,
+    createdAt: iso(7_000),
+  },
+  {
+    id: "sq_device_model",
+    prompt: "What is the model of your primary phone?",
+    category: "device",
+    requiredFor: ["new_device_login"],
+    active: true,
+    minAnswerLength: 2,
+    createdAt: iso(6_000),
+  },
+  {
+    id: "sq_ops_pin_phrase",
+    prompt: "Ops only — state the daily authorisation phrase",
+    category: "ops",
+    requiredFor: ["admin_kill_switch", "mass_freeze"],
+    active: true,
+    minAnswerLength: 4,
+    createdAt: iso(5_000),
+  },
+];
+
+const securityChallenges: SecurityChallenge[] = [
+  {
+    id: "sc_1",
+    userId: "user_demo",
+    userName: "Demo Self",
+    questionId: "sq_last_txn",
+    questionPrompt: "What was the approximate amount of your last successful transfer?",
+    status: "failed",
+    purpose: "high_value_send · step-up after insufficient_funds retry",
+    createdAt: iso(40),
+    resolvedAt: iso(39),
+  },
+  {
+    id: "sc_2",
+    userId: "user_kojo",
+    userName: "Kojo Asante",
+    questionId: "sq_first_school",
+    questionPrompt: "What was the name of your first school?",
+    status: "pending",
+    purpose: "unfreeze wallet · passkey + security question",
+    createdAt: iso(12),
+  },
+  {
+    id: "sc_3",
+    userId: "user_ama",
+    userName: "Ama Mensah",
+    questionId: "sq_city_born",
+    questionPrompt: "In which city were you born?",
+    status: "passed",
+    purpose: "receive_verify · account name match",
+    createdAt: iso(80),
+    resolvedAt: iso(79),
+  },
+];
+
+const workflowBlueprints: WorkflowBlueprint[] = [
+  {
+    id: "bp_domestic",
+    name: "Domestic transfer (sim)",
+    workflowType: "DomesticTransferSim",
+    taskQueue: "ephera-payments",
+    description: "Quote → authorise → ledger hold → rail execute → capture → receipt",
+    version: "1.0.0",
+    status: "published",
+    updatedAt: iso(20),
+    createdBy: "platform",
+    steps: [
+      { id: "s1", activity: "Quote", label: "Quote fee & route", required: true, timeoutSec: 30, retries: 3 },
+      { id: "s2", activity: "RequireAuthorisation", label: "Passkey / auth gate", required: true, timeoutSec: 30, retries: 3 },
+      { id: "s3", activity: "PostLedgerHold", label: "Ledger hold funds", required: true, timeoutSec: 30, retries: 3 },
+      { id: "s4", activity: "ExecuteRail", label: "Execute MM / bank rail", required: true, timeoutSec: 30, retries: 3 },
+      { id: "s5", activity: "CaptureLedger", label: "Capture hold → journal", required: true, timeoutSec: 30, retries: 3 },
+      { id: "s6", activity: "CreateReceipt", label: "Evidence receipt", required: true, timeoutSec: 30, retries: 2 },
+    ],
+  },
+  {
+    id: "bp_bill",
+    name: "Utility bill pay",
+    workflowType: "BillPaySim",
+    taskQueue: "ephera-payments",
+    description: "Lookup → quote → auth → hold → provider settle → receipt",
+    version: "0.2.0",
+    status: "draft",
+    updatedAt: iso(50),
+    createdBy: "superadmin",
+    steps: [
+      { id: "b1", activity: "AccountLookup", label: "Utility account lookup", required: true, timeoutSec: 20, retries: 2 },
+      { id: "b2", activity: "Quote", label: "Quote amount", required: true, timeoutSec: 20, retries: 2 },
+      { id: "b3", activity: "RequireAuthorisation", label: "Authorise", required: true, timeoutSec: 30, retries: 2 },
+      { id: "b4", activity: "PostLedgerHold", label: "Hold", required: true, timeoutSec: 30, retries: 3 },
+      { id: "b5", activity: "ExecuteUtility", label: "Pay utility", required: true, timeoutSec: 45, retries: 3 },
+      { id: "b6", activity: "CreateReceipt", label: "Receipt", required: true, timeoutSec: 20, retries: 2 },
+    ],
+  },
+  {
+    id: "bp_video_auth",
+    name: "Video receive verification",
+    workflowType: "VideoReceiveVerify",
+    taskQueue: "ephera-payments",
+    description: "Bank-style video/call verification before releasing inbound funds",
+    version: "0.1.0",
+    status: "draft",
+    updatedAt: iso(5),
+    createdBy: "superadmin",
+    steps: [
+      { id: "v1", activity: "RiskScore", label: "Score inbound risk", required: true, timeoutSec: 15, retries: 2 },
+      { id: "v2", activity: "SecurityQuestions", label: "Security questions", required: true, timeoutSec: 120, retries: 1 },
+      { id: "v3", activity: "StartVideoSession", label: "Open video session", required: false, timeoutSec: 300, retries: 1 },
+      { id: "v4", activity: "AgentDecision", label: "Ops approve/reject", required: true, timeoutSec: 600, retries: 1 },
+      { id: "v5", activity: "ReleaseInbound", label: "Credit wallet", required: true, timeoutSec: 30, retries: 3 },
+    ],
   },
 ];
 
@@ -792,6 +953,9 @@ export const store = {
   aiModels,
   aiSubscriptions,
   actions,
+  securityQuestions,
+  securityChallenges,
+  workflowBlueprints,
 
   setFeature(id: string, patch: Partial<FeatureFlag>, actor = "superadmin") {
     const f = featureFlags.find((x) => x.id === id);
@@ -839,7 +1003,7 @@ export const store = {
 
   logAction(action: string, target: string, actor: string, result: string) {
     actions.unshift({
-      id: `act_${Date.now()}`,
+      id: uid("act"),
       action,
       target,
       actor,
@@ -850,10 +1014,71 @@ export const store = {
   },
 
   ingestWorkflow(event: Omit<WorkflowEvent, "id">) {
-    const row: WorkflowEvent = { ...event, id: `wf_${Date.now()}` };
+    const row: WorkflowEvent = { ...event, id: uid("wf") };
     workflows.unshift(row);
     if (workflows.length > 500) workflows.length = 500;
     return row;
+  },
+
+  setSecurityQuestion(id: string, patch: Partial<SecurityQuestion>, actor = "superadmin") {
+    const q = securityQuestions.find((x) => x.id === id);
+    if (!q) return null;
+    Object.assign(q, patch);
+    this.logAction("security.question.update", id, actor, JSON.stringify(patch));
+    return q;
+  },
+
+  addSecurityQuestion(input: Omit<SecurityQuestion, "id" | "createdAt">, actor = "superadmin") {
+    const q: SecurityQuestion = {
+      ...input,
+      id: uid("sq"),
+      createdAt: new Date().toISOString(),
+    };
+    securityQuestions.unshift(q);
+    this.logAction("security.question.create", q.id, actor, q.prompt);
+    return q;
+  },
+
+  resolveChallenge(id: string, status: SecurityChallenge["status"], actor = "superadmin") {
+    const c = securityChallenges.find((x) => x.id === id);
+    if (!c) return null;
+    c.status = status;
+    c.resolvedAt = new Date().toISOString();
+    this.logAction("security.challenge", id, actor, status);
+    return c;
+  },
+
+  issueChallenge(
+    input: Omit<SecurityChallenge, "id" | "createdAt" | "status" | "resolvedAt">,
+    actor = "superadmin",
+  ) {
+    const c: SecurityChallenge = {
+      ...input,
+      id: uid("sc"),
+      status: "pending",
+      createdAt: new Date().toISOString(),
+    };
+    securityChallenges.unshift(c);
+    this.logAction("security.challenge.issue", c.id, actor, c.purpose);
+    return c;
+  },
+
+  saveBlueprint(bp: WorkflowBlueprint, actor = "superadmin") {
+    const i = workflowBlueprints.findIndex((x) => x.id === bp.id);
+    const next = { ...bp, updatedAt: new Date().toISOString() };
+    if (i >= 0) workflowBlueprints[i] = next;
+    else workflowBlueprints.unshift(next);
+    this.logAction("workflow.blueprint.save", next.id, actor, next.status);
+    return next;
+  },
+
+  publishBlueprint(id: string, actor = "superadmin") {
+    const bp = workflowBlueprints.find((x) => x.id === id);
+    if (!bp) return null;
+    bp.status = "published";
+    bp.updatedAt = new Date().toISOString();
+    this.logAction("workflow.blueprint.publish", id, actor, bp.workflowType);
+    return bp;
   },
 };
 
