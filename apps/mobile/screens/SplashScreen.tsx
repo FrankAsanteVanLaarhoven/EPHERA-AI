@@ -1,32 +1,65 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { VoiceOrb } from "../components/VoiceOrb";
-import { colors, space, typography } from "../theme";
+import { useTheme } from "../lib/theme-context";
+import { useT } from "../lib/i18n";
+import { NeonLogo } from "../components/brand/NeonLogo";
+import { space, typography } from "../theme";
 import type { Screen } from "../App";
 
 export default function SplashScreen({ go }: { go: (screen: Screen) => void }) {
+  const { colors, isDark, mood } = useTheme();
+  const t = useT();
+
   return (
     <Pressable style={styles.root} onPress={() => go("welcome")}>
+      {/* Deep stage so the tube light reads — light mode still uses dark navy stage for brand splash */}
       <LinearGradient
-        colors={["#02060F", "#07122A", "#050B18"]}
+        colors={
+          isDark
+            ? ["#010308", "#050B18", "#07122A", "#02060F"]
+            : ["#0A1628", "#0C1A32", "#0E2040", "#0A1628"]
+        }
         style={StyleSheet.absoluteFill}
       />
-      {/* Planet horizon glow */}
+      {/* Mood-coloured ambient bloom behind the mark */}
       <LinearGradient
-        colors={["transparent", "rgba(37,99,235,0.15)", "rgba(14,165,233,0.08)"]}
+        colors={[`${mood.halo}33`, `${mood.halo}08`, "transparent"]}
+        style={styles.bloom}
+      />
+      <LinearGradient
+        colors={["transparent", "rgba(37,99,235,0.14)", "rgba(14,165,233,0.08)"]}
         style={styles.horizon}
       />
-      <View style={styles.atmosphere} />
 
       <View style={styles.hero}>
-        <VoiceOrb size={210} showWaves={false} />
-        <Text style={styles.brand}>EPHERA</Text>
-        <Text style={styles.tag}>MONEY WITHOUT LIMITS</Text>
+        {/* Official stacked mark with silhouette-matched neon tube + pulse */}
+        <NeonLogo
+          layout="stacked"
+          intensity="tube"
+          pulse
+          size={isDark ? 168 : 160}
+          plate={false}
+        />
       </View>
 
       <View style={styles.bottom}>
-        <Text style={styles.headline}>Voice. Intent. Money.</Text>
-        <Text style={styles.sub}>The future of finance is here.</Text>
+        <Text
+          style={[
+            styles.headline,
+            {
+              color: "#F4F8FF",
+              textShadowColor: mood.halo,
+              textShadowOffset: { width: 0, height: 0 },
+              textShadowRadius: 10,
+            },
+          ]}
+        >
+          {t("splash.headline")}
+        </Text>
+        <Text style={[styles.sub, { color: "rgba(244,248,255,0.55)" }]}>
+          {t("splash.sub")}
+        </Text>
+        <Text style={[styles.hint, { color: `${mood.tube}99` }]}>Tap to continue</Text>
       </View>
     </Pressable>
   );
@@ -37,7 +70,15 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.bgDeep,
+    backgroundColor: "#050B18",
+  },
+  bloom: {
+    position: "absolute",
+    top: "18%",
+    left: "8%",
+    right: "8%",
+    height: "42%",
+    borderRadius: 999,
   },
   horizon: {
     position: "absolute",
@@ -46,47 +87,32 @@ const styles = StyleSheet.create({
     right: 0,
     height: "42%",
   },
-  atmosphere: {
-    position: "absolute",
-    top: "18%",
-    width: 360,
-    height: 360,
-    borderRadius: 180,
-    backgroundColor: "rgba(37, 99, 235, 0.08)",
-  },
   hero: {
     alignItems: "center",
-    marginTop: -40,
-  },
-  brand: {
-    marginTop: -8,
-    color: colors.text,
-    fontSize: 44,
-    fontWeight: "200",
-    letterSpacing: 12,
-  },
-  tag: {
-    marginTop: 10,
-    color: "rgba(148,163,184,0.75)",
-    fontSize: 10,
-    letterSpacing: 5,
-    fontWeight: "600",
+    marginTop: -24,
   },
   bottom: {
     position: "absolute",
-    bottom: 78,
+    bottom: 72,
     alignItems: "center",
     paddingHorizontal: space.lg,
   },
   headline: {
-    color: colors.text,
-    fontSize: 18,
+    fontSize: typography.subtitle,
     fontWeight: "600",
     letterSpacing: 0.2,
+    fontFamily: "System",
   },
   sub: {
     marginTop: 8,
-    color: colors.textMuted,
     fontSize: typography.caption,
+    fontFamily: "System",
+  },
+  hint: {
+    marginTop: 18,
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
   },
 });

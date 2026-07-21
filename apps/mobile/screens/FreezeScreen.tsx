@@ -1,52 +1,81 @@
-import { useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { createPasskeyModule } from "@ephera/passkeys";
-import { GlassCard, PrimaryButton, Screen } from "../components/ui";
-import { colors, space, typography } from "../theme";
-import { PAYMENTS_URL } from "../lib/config";
-import type { Screen as Route } from "../App";
+import {
+  GlassCard,
+  Icon,
+  IconWell,
+  PrimaryButton,
+} from "../components/ui";
+import { ScreenHeader } from "../components/ScreenHeader";
+import { fetchBalance, freezeWallet, unfreezeWallet } from "../lib/api";
+import { brandHaptic } from "../lib/brand-system/haptics";
+import { brandSonic } from "../lib/brand-system/sonic";
+import { useTheme } from "../lib/theme-context";
+import type { Screen as Route } from "../lib/navigation";
+import { space } from "../theme";
 
 const passkeys = createPasskeyModule({ allowMock: true });
 
-export default function FreezeScreen({
-  back,
-}: {
-  go: (screen: Route, params?: Record<string, string>) => void;
-  back: () => void;
-}) {
+type Go = (s: Route, p?: Record<string, string>) => void;
+
+export default function FreezeScreen({ go, back }: { go: Go; back: () => void }) {
+  const { colors, mood, isDark } = useTheme();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [frozen, setFrozen] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  async function freeze() {
+  const refresh = useCallback(async () => {
+    const bal = await fetchBalance();
+    if (bal) setFrozen(bal.status === "frozen");
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function authoriseAnd(action: "freeze" | "unfreeze") {
     setBusy(true);
     setStatus(null);
     try {
       const auth = await passkeys.authorise({
-        transferId: `freeze_${Date.now()}`,
+        transferId: `${action}_${Date.now()}`,
         amountMinor: 1,
         currency: "GHS",
         recipientName: "SELF",
-        challengeSummary: "Freeze wallet — block outbound transfers",
+        challengeSummary:
+          action === "freeze"
+            ? "Freeze wallet — block outbound transfers"
+            : "Unfreeze wallet — restore outbound transfers",
       });
       if (!auth.ok) {
         setStatus(`Authorisation failed: ${auth.error}`);
+        void brandHaptic("securityWarning");
+        void brandSonic("warning");
         return;
       }
-      const res = await fetch(`${PAYMENTS_URL}/v1/wallet/freeze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          externalRef: "user:demo-self:GHS",
-          reason: "user_requested_possible_theft",
-          authorisationRef: auth.authorisationRef,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setStatus(data.message ?? data.error ?? `HTTP ${res.status}`);
+      const result =
+        action === "freeze"
+          ? await freezeWallet(auth.authorisationRef)
+          : await unfreezeWallet(auth.authorisationRef);
+      if (!result.ok) {
+        setStatus(result.message ?? result.error ?? "Request failed");
+        void brandHaptic("securityWarning");
         return;
       }
-      setStatus(`${data.message}\nAccount status: ${data.status}`);
+      setFrozen(action === "freeze");
+      setStatus(result.message ?? "Done");
+      void brandHaptic(action === "freeze" ? "securityWarning" : "paymentCompleted");
+      void brandSonic(action === "freeze" ? "warning" : "success");
+      await refresh();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
     } finally {
@@ -55,55 +84,129 @@ export default function FreezeScreen({
   }
 
   return (
-    <Screen>
-      <Pressable onPress={back}>
-        <Text style={styles.back}>← Back</Text>
-      </Pressable>
-      <Text style={styles.kicker}>SECURITY</Text>
-      <Text style={styles.title}>Freeze wallet</Text>
-      <Text style={styles.body}>
-        Immediately blocks outbound transfers. Passkey required — voice alone cannot freeze or
-        unfreeze.
-      </Text>
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <ScreenHeader
+        title={frozen ? "Wallet frozen" : "Freeze wallet"}
+        subtitle="Passkey required · voice cannot freeze"
+        onBack={back}
+      />
+      <ScrollView contentContainerStyle={{ padding: space.lg, paddingBottom: 40 }}>
+        {loading ? (
+          <ActivityIndicator color={colors.accent} style={{ marginTop: 24 }} />
+        ) : (
+          <>
+            <View
+              style={[
+                styles.banner,
+                {
+                  backgroundColor: frozen ? "rgba(248,113,113,0.12)" : "rgba(52,211,153,0.1)",
+                  borderColor: frozen ? colors.danger : colors.success,
+                },
+              ]}
+            >
+              <IconWell
+                name={frozen ? "freeze" : "shield"}
+                size={44}
+                tone={frozen ? "danger" : "success"}
+              />
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    color: frozen ? colors.danger : colors.success,
+                    fontWeight: "800",
+                    fontSize: 15,
+                  }}
+                >
+                  {frozen ? "OUTBOUND BLOCKED" : "WALLET ACTIVE"}
+                </Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 4, lineHeight: 17 }}>
+                  {frozen
+                    ? "Outbound transfers blocked. Inbound payments still credit."
+                    : "Immediately blocks outbound transfers when frozen."}
+                </Text>
+              </View>
+            </View>
 
-      <GlassCard style={{ marginTop: space.lg }}>
-        <Text style={styles.cardTitle}>What happens next</Text>
-        <Text style={styles.bullet}>• Outbound payments blocked</Text>
-        <Text style={styles.bullet}>• Inbound transfers still credit</Text>
-        <Text style={styles.bullet}>• Unfreeze requires stronger step-up</Text>
-      </GlassCard>
+            <GlassCard style={{ marginTop: 14 }} halo>
+              <Text style={{ color: colors.text, fontWeight: "700", marginBottom: 12 }}>
+                What happens next
+              </Text>
+              {(
+                [
+                  { icon: "send" as const, t: "Outbound payments blocked when frozen" },
+                  { icon: "receive" as const, t: "Inbound transfers still credit" },
+                  { icon: "passkey" as const, t: "Unfreeze requires passkey step-up" },
+                  { icon: "shield" as const, t: `Status: ${frozen ? "FROZEN" : "ACTIVE"}` },
+                ] as const
+              ).map((row) => (
+                <View key={row.t} style={styles.bulletRow}>
+                  <Icon name={row.icon} size={16} color={mood.tube} />
+                  <Text style={{ color: colors.textMuted, flex: 1, lineHeight: 20 }}>{row.t}</Text>
+                </View>
+              ))}
+            </GlassCard>
 
-      <View style={{ marginTop: "auto", gap: 10 }}>
-        <PrimaryButton
-          label={busy ? "Freezing…" : "Freeze with passkey"}
-          variant="danger"
-          onPress={() => void freeze()}
-          disabled={busy}
-        />
-        <PrimaryButton label="Cancel" variant="ghost" onPress={back} />
-      </View>
-      {busy ? <ActivityIndicator color={colors.danger} style={{ marginTop: 12 }} /> : null}
-      {status ? <Text style={styles.status}>{status}</Text> : null}
-    </Screen>
+            <Text style={{ color: colors.textDim, fontSize: 12, marginTop: 14, lineHeight: 18 }}>
+              Strong authentication is required. Voice alone cannot freeze or unfreeze.
+            </Text>
+
+            {status ? (
+              <GlassCard style={{ marginTop: 14 }} halo>
+                <Text style={{ color: colors.text, lineHeight: 20 }}>{status}</Text>
+              </GlassCard>
+            ) : null}
+
+            <View style={{ marginTop: 24, gap: 10 }}>
+              {!frozen ? (
+                <PrimaryButton
+                  label={busy ? "Freezing…" : "Freeze with passkey"}
+                  variant="danger"
+                  iconName="freeze"
+                  onPress={() => void authoriseAnd("freeze")}
+                  disabled={busy}
+                  click="sec_freeze"
+                />
+              ) : (
+                <PrimaryButton
+                  label={busy ? "Unfreezing…" : "Unfreeze with passkey"}
+                  variant="primary"
+                  iconName="passkey"
+                  onPress={() => void authoriseAnd("unfreeze")}
+                  disabled={busy}
+                  click="sec_auth"
+                />
+              )}
+              <PrimaryButton
+                label="Open support"
+                variant="ghost"
+                onPress={() => go("support")}
+                click="ui_nav"
+              />
+              <PrimaryButton label="Done" variant="secondary" onPress={back} click="ui_back" />
+            </View>
+            {busy ? (
+              <ActivityIndicator color={colors.danger} style={{ marginTop: 16 }} />
+            ) : null}
+          </>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  back: { color: colors.accentBright, fontWeight: "600", marginBottom: space.sm },
-  kicker: {
-    color: colors.danger,
-    fontWeight: "700",
-    fontSize: typography.micro,
-    letterSpacing: 1.2,
+  banner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  title: {
-    color: colors.text,
-    fontSize: typography.title,
-    fontWeight: "700",
-    marginTop: 4,
+  bulletRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 10,
   },
-  body: { color: colors.textMuted, marginTop: 8, lineHeight: 21 },
-  cardTitle: { color: colors.text, fontWeight: "700", marginBottom: 10 },
-  bullet: { color: colors.textMuted, marginBottom: 6, lineHeight: 20 },
-  status: { color: colors.text, marginTop: space.md, lineHeight: 22 },
 });

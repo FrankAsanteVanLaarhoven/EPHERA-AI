@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Institutional lockup — banks, regulators, APIs, legal documents.
+  Flat navy on white · no glow · no space imagery · corporate descriptor.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 120" fill="none" role="img" aria-label="EPHERA — The voice-native financial network">
+  <title>EPHERA institutional lockup</title>
+  <rect width="420" height="120" fill="#FFFFFF"/>
+  <rect x="24" y="32" width="48" height="10.5" rx="5.25" fill="#0B1B3A"/>
+  <rect x="24" y="47.75" width="36" height="10.5" rx="5.25" fill="#0B1B3A"/>
+  <rect x="24" y="63.5" width="48" height="10.5" rx="5.25" fill="#0B1B3A"/>
+  <text x="90" y="58"
+    font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+    font-size="28" font-weight="500" letter-spacing="0.16em" fill="#0B1B3A">EPHERA</text>
+  <text x="90" y="82"
+    font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+    font-size="12" font-weight="500" letter-spacing="0.02em" fill="#475569">The voice-native financial network</text>
+</svg>

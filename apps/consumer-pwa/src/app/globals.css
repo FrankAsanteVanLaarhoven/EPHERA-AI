@@ -1,0 +1,115 @@
+:root {
+  --bg: #050b18;
+  --bg2: #0c1526;
+  --text: #f4f8ff;
+  --muted: #8b9bb8;
+  --dim: #5c6b86;
+  --accent: #3b82f6;
+  --accent-bright: #60a5fa;
+  --success: #34d399;
+  --danger: #f87171;
+  --border: rgba(244, 248, 255, 0.12);
+  --tube: #f4f8ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  min-height: 100%;
+}
+
+a {
+  color: var(--accent-bright);
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.glass {
+  background: rgba(18, 29, 50, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(147, 197, 253, 0.4);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.4), rgba(37, 99, 235, 0.18));
+  color: #f0f7ff;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--border);
+}
+
+.btn.danger {
+  background: linear-gradient(180deg, rgba(248, 113, 113, 0.35), rgba(220, 38, 38, 0.15));
+  border-color: rgba(252, 165, 165, 0.4);
+}
+
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  font-size: 15px;
+}
+
+.kicker {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.install-banner {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: none;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 16px;
+  background: rgba(12, 21, 38, 0.95);
+  border-bottom: 1px solid var(--border);
+}
+
+.install-banner.show {
+  display: flex;
+}

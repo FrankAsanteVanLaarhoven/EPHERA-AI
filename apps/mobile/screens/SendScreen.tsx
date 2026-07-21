@@ -2,21 +2,49 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { PaymentIntent } from "@ephera/intent-schema";
 import { validatePaymentIntent } from "@ephera/validation";
 import { createPasskeyModule } from "@ephera/passkeys";
 import { OfflineQueue, MemoryStorage } from "@ephera/offline-queue";
-import { GlassCard, PrimaryButton, Screen } from "../components/ui";
-import { colors, space, typography } from "../theme";
+import { GlassCard, Icon, IconWell, PrimaryButton, type IconName } from "../components/ui";
+import { ScreenHeader } from "../components/ScreenHeader";
+import { TrustRow } from "../components/brand/TrustMarker";
+import { brandHaptic } from "../lib/brand-system/haptics";
+import { brandSonic } from "../lib/brand-system/sonic";
+import { useTheme } from "../lib/theme-context";
 import { PAYMENTS_URL } from "../lib/config";
-import type { Screen as Route } from "../App";
+import type { Screen as Route } from "../lib/navigation";
+import { radii, space } from "../theme";
 
 const passkeys = createPasskeyModule({ allowMock: true });
 const offlineQueue = new OfflineQueue(new MemoryStorage());
+
+type Go = (s: Route, p?: Record<string, string>) => void;
+type Step = "recipient" | "amount" | "review" | "done";
+type Rail = "contact" | "mobile" | "bank" | "momo" | "username" | "qr" | "intl";
+
+const RAILS: { id: Rail; label: string; icon: IconName }[] = [
+  { id: "contact", label: "Contact", icon: "contact" },
+  { id: "mobile", label: "Mobile", icon: "phone" },
+  { id: "bank", label: "Bank", icon: "bank" },
+  { id: "momo", label: "MoMo", icon: "momo" },
+  { id: "username", label: "Username", icon: "at" },
+  { id: "qr", label: "Scan QR", icon: "qr" },
+  { id: "intl", label: "Intl", icon: "globe" },
+];
+
+const RECENT = [
+  { name: "Ama Mensah", hint: "wallet ending 4281", handle: "ama.m" },
+  { name: "Nana Kwame", hint: "MTN · ••55 1234", handle: "nana.k" },
+  { name: "Kojo Mensah", hint: "GCB · ••8821", handle: "kojo.m" },
+];
 
 function formatMoney(minor: number, currency: string) {
   if (currency === "GHS") return `GH₵ ${(minor / 100).toFixed(2)}`;
@@ -24,39 +52,40 @@ function formatMoney(minor: number, currency: string) {
 }
 
 export default function SendScreen({
+  go,
   back,
   params,
 }: {
-  go: (screen: Route, params?: Record<string, string>) => void;
+  go: Go;
   back: () => void;
   params?: Record<string, string>;
 }) {
-  const intent: PaymentIntent = useMemo(() => {
-    if (params?.intentJson) {
-      try {
-        return JSON.parse(params.intentJson) as PaymentIntent;
-      } catch {
-        /* fallthrough */
-      }
+  const insets = useSafeAreaInsets();
+  const { colors, isDark } = useTheme();
+
+  const fromIntent = useMemo(() => {
+    if (!params?.intentJson) return null;
+    try {
+      return JSON.parse(params.intentJson) as PaymentIntent;
+    } catch {
+      return null;
     }
-    return {
-      id: "intent_demo_001",
-      name: "send_money",
-      language: "en",
-      confidence: 0.92,
-      amount: { amountMinor: 10000, currency: "GHS" },
-      recipient: {
-        displayName: "Ama Mensah",
-        accountHint: "wallet ending 4281",
-        verified: true,
-        isNew: false,
-      },
-      rawUtterance: "Send 100 cedis to Ama",
-      createdAt: new Date().toISOString(),
-    };
   }, [params?.intentJson]);
 
-  const issues = validatePaymentIntent(intent);
+  const [step, setStep] = useState<Step>(fromIntent ? "review" : "recipient");
+  const [rail, setRail] = useState<Rail>("contact");
+  const [recipientName, setRecipientName] = useState(
+    fromIntent?.recipient?.displayName ?? "",
+  );
+  const [recipientHint, setRecipientHint] = useState(
+    fromIntent?.recipient?.accountHint ?? "",
+  );
+  const [amountStr, setAmountStr] = useState(
+    fromIntent?.amount
+      ? String(fromIntent.amount.amountMinor / 100)
+      : "",
+  );
+  const [note, setNote] = useState(fromIntent?.rawUtterance ?? "");
   const [feeMinor, setFeeMinor] = useState(0);
   const [route, setRoute] = useState("EPHERA → mobile money");
   const [eta, setEta] = useState("Under 2 minutes");
@@ -64,34 +93,61 @@ export default function SendScreen({
   const [busy, setBusy] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
 
+  const amountMinor = Math.round((Number(amountStr) || 0) * 100);
+
+  const intent: PaymentIntent = useMemo(
+    () => ({
+      id: fromIntent?.id ?? `send_${Date.now()}`,
+      name: "send_money",
+      language: "en",
+      confidence: fromIntent?.confidence ?? 0.95,
+      amount: { amountMinor: amountMinor || 0, currency: "GHS" },
+      recipient: {
+        displayName: recipientName || "Unknown",
+        accountHint: recipientHint || rail,
+        verified: true,
+        isNew: false,
+      },
+      rawUtterance: note,
+      createdAt: new Date().toISOString(),
+    }),
+    [fromIntent?.id, fromIntent?.confidence, amountMinor, recipientName, recipientHint, rail, note],
+  );
+
+  const issues = validatePaymentIntent(intent);
+
   useEffect(() => {
-    const amount = intent.amount?.amountMinor ?? 0;
-    const currency = intent.amount?.currency ?? "GHS";
+    if (step !== "review" || amountMinor <= 0) return;
     void (async () => {
       try {
         const res = await fetch(`${PAYMENTS_URL}/v1/quotes`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ amountMinor: amount, currency, rail: "mobile-money-sim" }),
+          body: JSON.stringify({
+            amountMinor,
+            currency: "GHS",
+            rail: "mobile-money-sim",
+          }),
         });
         if (res.ok) {
           const q = await res.json();
           setFeeMinor(q.feeMinor ?? 0);
-          setRoute(q.routeSummary ?? route);
-          setEta(q.eta ?? eta);
+          setRoute(q.routeSummary ?? "EPHERA → mobile money");
+          setEta(q.eta ?? "Under 2 minutes");
         }
       } catch {
         /* keep defaults */
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intent.id]);
+  }, [step, amountMinor]);
 
   async function authoriseAndSend() {
     if (issues.length > 0 || !intent.amount || !intent.recipient?.displayName) return;
     setBusy(true);
     setStatus(null);
     setReceipt(null);
+    void brandHaptic("authorisationRequired");
+    void brandSonic("secureAuth");
     try {
       const transferId = `tx_local_${Date.now()}`;
       const auth = await passkeys.authorise({
@@ -129,9 +185,10 @@ export default function SendScreen({
             authorisationRef: auth.authorisationRef,
           });
           setStatus(data.error ?? "Queued offline as pending.");
+          setStep("done");
           return;
         }
-        setStatus(`✓ ${data.status}`);
+        setStatus(`✓ ${data.status ?? "settled"}`);
         setReceipt(
           [
             data.transferId && `Transfer ${data.transferId}`,
@@ -142,6 +199,9 @@ export default function SendScreen({
             .filter(Boolean)
             .join("\n"),
         );
+        void brandHaptic("paymentCompleted");
+        void brandSonic("success");
+        setStep("done");
       } catch {
         offlineQueue.enqueue({
           id: transferId,
@@ -150,110 +210,525 @@ export default function SendScreen({
           authorisationRef: auth.authorisationRef,
         });
         setStatus("Network unavailable — authorised transfer queued offline.");
+        setStep("done");
       }
     } finally {
       setBusy(false);
     }
   }
 
-  const amountLabel = intent.amount
-    ? formatMoney(intent.amount.amountMinor, intent.amount.currency)
-    : "—";
+  function pickRecent(r: (typeof RECENT)[0]) {
+    setRecipientName(r.name);
+    setRecipientHint(r.hint);
+    setRail("contact");
+    setStep("amount");
+  }
+
+  function onRail(id: Rail) {
+    if (id === "qr") {
+      go("scan");
+      return;
+    }
+    if (id === "intl") {
+      go("crossBorder");
+      return;
+    }
+    setRail(id);
+  }
 
   return (
-    <Screen>
-      <Pressable onPress={back} style={styles.backRow}>
-        <Text style={styles.back}>← Back</Text>
-      </Pressable>
-      <Text style={styles.kicker}>SEND MONEY</Text>
-      <Text style={styles.title}>Confirm transfer</Text>
-      <Text style={styles.sub}>
-        Review recipient, cost and consequence — then authorise with passkey.
-      </Text>
-
-      <GlassCard style={{ marginTop: space.lg }}>
-        <Text style={styles.label}>Recipient</Text>
-        <Text style={styles.value}>
-          {intent.recipient?.displayName ?? "Unknown"}
-          {intent.recipient?.verified ? "  · verified" : ""}
-        </Text>
-        {intent.recipient?.accountHint ? (
-          <Text style={styles.muted}>{intent.recipient.accountHint}</Text>
-        ) : null}
-
-        <Text style={[styles.label, styles.mt]}>You send</Text>
-        <Text style={styles.amount}>{amountLabel}</Text>
-
-        <View style={styles.row}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>Fee</Text>
-            <Text style={styles.valueSm}>
-              {formatMoney(feeMinor, intent.amount?.currency ?? "GHS")}
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <ScreenHeader
+        title="Send"
+        subtitle={
+          step === "recipient"
+            ? "Choose recipient"
+            : step === "amount"
+              ? "Enter amount"
+              : step === "review"
+                ? "Review full cost"
+                : "Receipt"
+        }
+        onBack={() => {
+          if (step === "amount") setStep("recipient");
+          else if (step === "review" && !fromIntent) setStep("amount");
+          else if (step === "done") back();
+          else back();
+        }}
+        right={
+          <Pressable onPress={() => go("scan")} hitSlop={8}>
+            <Text style={{ color: colors.accentBright, fontWeight: "600", fontSize: 13 }}>
+              QR
             </Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>ETA</Text>
-            <Text style={styles.valueSm}>{eta}</Text>
-          </View>
+          </Pressable>
+        }
+      />
+
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: space.lg,
+          paddingBottom: Math.max(insets.bottom, 20) + 24,
+        }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Progress */}
+        <View style={styles.progress}>
+          {(["recipient", "amount", "review"] as const).map((s, i) => {
+            const active =
+              s === step ||
+              (step === "done" && true) ||
+              (step === "amount" && s === "recipient") ||
+              (step === "review" && s !== "review");
+            const current = s === step;
+            return (
+              <View key={s} style={styles.progItem}>
+                <View
+                  style={[
+                    styles.progDot,
+                    {
+                      backgroundColor: current
+                        ? colors.accent
+                        : active
+                          ? colors.success
+                          : colors.border,
+                    },
+                  ]}
+                />
+                {i < 2 ? (
+                  <View style={[styles.progLine, { backgroundColor: colors.border }]} />
+                ) : null}
+              </View>
+            );
+          })}
         </View>
 
-        <Text style={[styles.label, styles.mt]}>Route</Text>
-        <Text style={styles.muted}>{route}</Text>
-      </GlassCard>
+        {step === "recipient" && (
+          <>
+            <Text style={[styles.sec, { color: colors.textDim }]}>Send to</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.rails}
+            >
+              {RAILS.map((r) => {
+                const active = rail === r.id;
+                return (
+                  <Pressable
+                    key={r.id}
+                    onPress={() => onRail(r.id)}
+                    style={[
+                      styles.rail,
+                      {
+                        borderColor: active
+                          ? colors.borderStrong
+                          : isDark
+                            ? "rgba(255,255,255,0.1)"
+                            : colors.border,
+                        backgroundColor: active
+                          ? colors.accentSoft
+                          : isDark
+                            ? "rgba(255,255,255,0.04)"
+                            : "rgba(255,255,255,0.65)",
+                      },
+                    ]}
+                  >
+                    <IconWell
+                      name={r.icon}
+                      size={36}
+                      iconSize={18}
+                      tone={active ? "accent" : "tube"}
+                      rounded={10}
+                    />
+                    <Text
+                      style={{
+                        color: active ? colors.accentBright : colors.textMuted,
+                        fontSize: 11,
+                        fontWeight: "700",
+                        marginTop: 8,
+                        letterSpacing: 0.2,
+                      }}
+                      numberOfLines={1}
+                    >
+                      {r.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
 
-      {issues.length > 0 ? (
-        <Text style={styles.warn}>Validation: {issues.map((i) => i.code).join(", ")}</Text>
-      ) : (
-        <Text style={styles.ok}>Voice proposed · passkey required to release funds</Text>
-      )}
+            <GlassCard style={{ marginBottom: 12 }}>
+              <Text style={[styles.label, { color: colors.textDim }]}>
+                {rail === "mobile" || rail === "momo"
+                  ? "Mobile number"
+                  : rail === "bank"
+                    ? "Account number"
+                    : rail === "username"
+                      ? "Ephera username"
+                      : "Name or search"}
+              </Text>
+              <TextInput
+                value={recipientName}
+                onChangeText={setRecipientName}
+                placeholder={
+                  rail === "username"
+                    ? "@username"
+                    : rail === "mobile" || rail === "momo"
+                      ? "+233 …"
+                      : "Recipient"
+                }
+                placeholderTextColor={colors.textDim}
+                autoCapitalize={rail === "username" ? "none" : "words"}
+                style={[
+                  styles.input,
+                  {
+                    color: colors.text,
+                    borderColor: colors.border,
+                    backgroundColor: isDark ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.65)",
+                  },
+                ]}
+              />
+              {(rail === "bank" || rail === "momo") && (
+                <>
+                  <Text style={[styles.label, { color: colors.textDim, marginTop: 12 }]}>
+                    {rail === "bank" ? "Bank / account hint" : "Network"}
+                  </Text>
+                  <TextInput
+                    value={recipientHint}
+                    onChangeText={setRecipientHint}
+                    placeholder={rail === "bank" ? "GCB · account" : "MTN / Vodafone / AirtelTigo"}
+                    placeholderTextColor={colors.textDim}
+                    style={[
+                      styles.input,
+                      {
+                        color: colors.text,
+                        borderColor: colors.border,
+                        backgroundColor: isDark ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.65)",
+                      },
+                    ]}
+                  />
+                </>
+              )}
+            </GlassCard>
 
-      <View style={{ marginTop: "auto", gap: 10 }}>
-        <PrimaryButton
-          label={busy ? "Authorising…" : "Authorise with passkey"}
-          onPress={() => void authoriseAndSend()}
-          disabled={issues.length > 0 || busy}
-        />
-        <PrimaryButton label="Cancel" variant="ghost" onPress={back} />
-      </View>
+            <Text style={[styles.sec, { color: colors.textDim }]}>Recent</Text>
+            <GlassCard style={{ paddingVertical: 4, paddingHorizontal: 4, marginBottom: 16 }}>
+              {RECENT.map((r, i) => (
+                <Pressable
+                  key={r.name}
+                  onPress={() => pickRecent(r)}
+                  style={[
+                    styles.recent,
+                    i < RECENT.length - 1 && {
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.text, fontWeight: "700" }}>{r.name}</Text>
+                    <Text style={{ color: colors.textDim, fontSize: 11, marginTop: 2 }}>
+                      {r.hint}
+                    </Text>
+                  </View>
+                  <Text style={{ color: colors.textDim }}>›</Text>
+                </Pressable>
+              ))}
+            </GlassCard>
 
-      {busy ? <ActivityIndicator color={colors.accent} style={{ marginTop: 12 }} /> : null}
-      {status ? <Text style={styles.status}>{status}</Text> : null}
-      {receipt ? <Text style={styles.receipt}>{receipt}</Text> : null}
-    </Screen>
+            <PrimaryButton
+              label="Continue"
+              disabled={!recipientName.trim()}
+              onPress={() => {
+                if (!recipientHint) {
+                  setRecipientHint(
+                    rail === "username"
+                      ? `ephera · ${recipientName}`
+                      : `${rail} · verified`,
+                  );
+                }
+                setStep("amount");
+              }}
+            />
+          </>
+        )}
+
+        {step === "amount" && (
+          <>
+            <GlassCard style={{ marginBottom: 12 }}>
+              <Text style={{ color: colors.textDim, fontSize: 12 }}>To</Text>
+              <Text style={{ color: colors.text, fontSize: 18, fontWeight: "700", marginTop: 4 }}>
+                {recipientName}
+              </Text>
+              <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
+                {recipientHint || rail}
+              </Text>
+            </GlassCard>
+            <GlassCard style={{ marginBottom: 12 }}>
+              <Text style={[styles.label, { color: colors.textDim }]}>You send</Text>
+              <View style={styles.amountRow}>
+                <Text style={{ color: colors.textMuted, fontSize: 22, fontWeight: "600" }}>
+                  GH₵
+                </Text>
+                <TextInput
+                  value={amountStr}
+                  onChangeText={(t) => setAmountStr(t.replace(/[^0-9.]/g, ""))}
+                  keyboardType="decimal-pad"
+                  placeholder="0.00"
+                  placeholderTextColor={colors.textDim}
+                  style={[styles.amountInput, { color: colors.text }]}
+                  autoFocus
+                />
+              </View>
+              <View style={styles.presets}>
+                {["20", "50", "100", "200", "500"].map((p) => (
+                  <Pressable
+                    key={p}
+                    onPress={() => setAmountStr(p)}
+                    style={[
+                      styles.preset,
+                      {
+                        borderColor: amountStr === p ? colors.borderStrong : colors.border,
+                        backgroundColor:
+                          amountStr === p ? colors.accentSoft : "rgba(255,255,255,0.04)",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        color: amountStr === p ? colors.accentBright : colors.textMuted,
+                        fontWeight: "700",
+                        fontSize: 12,
+                      }}
+                    >
+                      {p}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={[styles.label, { color: colors.textDim, marginTop: 12 }]}>Note</Text>
+              <TextInput
+                value={note}
+                onChangeText={setNote}
+                placeholder="Optional"
+                placeholderTextColor={colors.textDim}
+                style={[
+                  styles.input,
+                  {
+                    color: colors.text,
+                    borderColor: colors.border,
+                    backgroundColor: isDark ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.65)",
+                  },
+                ]}
+              />
+            </GlassCard>
+            <PrimaryButton
+              label="Compare routes & review"
+              disabled={amountMinor <= 0}
+              onPress={() => setStep("review")}
+            />
+          </>
+        )}
+
+        {(step === "review" || step === "done") && (
+          <>
+            <GlassCard style={{ marginBottom: 12 }}>
+              <Text style={[styles.label, { color: colors.textDim }]}>Recipient</Text>
+              <Text style={{ color: colors.text, fontSize: 18, fontWeight: "700" }}>
+                {intent.recipient?.displayName}
+                {intent.recipient?.verified ? "  · verified" : ""}
+              </Text>
+              {intent.recipient?.accountHint ? (
+                <Text style={{ color: colors.textMuted, marginTop: 2 }}>
+                  {intent.recipient.accountHint}
+                </Text>
+              ) : null}
+
+              <Text style={[styles.label, { color: colors.textDim, marginTop: 14 }]}>
+                You send
+              </Text>
+              <Text style={{ color: colors.text, fontSize: 32, fontWeight: "700" }}>
+                {formatMoney(amountMinor, "GHS")}
+              </Text>
+
+              <View style={styles.costGrid}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.label, { color: colors.textDim }]}>Fee</Text>
+                  <Text style={{ color: colors.text, fontWeight: "700" }}>
+                    {formatMoney(feeMinor, "GHS")}
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.label, { color: colors.textDim }]}>Total debit</Text>
+                  <Text style={{ color: colors.text, fontWeight: "700" }}>
+                    {formatMoney(amountMinor + feeMinor, "GHS")}
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.label, { color: colors.textDim }]}>ETA</Text>
+                  <Text style={{ color: colors.text, fontWeight: "700" }}>{eta}</Text>
+                </View>
+              </View>
+
+              <Text style={[styles.label, { color: colors.textDim, marginTop: 12 }]}>Route</Text>
+              <Text style={{ color: colors.textMuted }}>{route}</Text>
+            </GlassCard>
+
+            <View style={{ marginBottom: 12 }}>
+              <TrustRow
+                kinds={
+                  step === "done"
+                    ? [
+                        "verifiedRecipient",
+                        "feeDisclosed",
+                        "railSelected",
+                        "passkey",
+                        "settled",
+                      ]
+                    : [
+                        "verifiedRecipient",
+                        "feeDisclosed",
+                        "railSelected",
+                        "passkey",
+                        "irreversible",
+                      ]
+                }
+              />
+            </View>
+
+            {issues.length > 0 ? (
+              <Text style={{ color: colors.warning, marginBottom: 10 }}>
+                Validation: {issues.map((i) => i.code).join(", ")}
+              </Text>
+            ) : (
+              <Text style={{ color: colors.success, marginBottom: 10, fontSize: 13 }}>
+                Full cost shown · passkey required to release funds
+              </Text>
+            )}
+
+            {step === "review" && (
+              <>
+                <PrimaryButton
+                  label={busy ? "Authorising…" : "Authorise with passkey"}
+                  onPress={() => void authoriseAndSend()}
+                  disabled={issues.length > 0 || busy || amountMinor <= 0}
+                  click="sec_auth"
+                />
+                <View style={{ height: 8 }} />
+                <PrimaryButton label="Cancel" variant="ghost" onPress={back} />
+              </>
+            )}
+
+            {busy ? (
+              <ActivityIndicator color={colors.accent} style={{ marginTop: 12 }} />
+            ) : null}
+            {status ? (
+              <Text style={{ color: colors.text, marginTop: 12, lineHeight: 20 }}>{status}</Text>
+            ) : null}
+            {receipt ? (
+              <Text
+                style={{
+                  color: colors.textMuted,
+                  marginTop: 8,
+                  fontFamily: "Courier",
+                  fontSize: 12,
+                  lineHeight: 18,
+                }}
+              >
+                {receipt}
+              </Text>
+            ) : null}
+
+            {step === "done" && (
+              <>
+                <View style={{ height: 12 }} />
+                <PrimaryButton
+                  label="View receipt"
+                  variant="secondary"
+                  onPress={() =>
+                    go("receipt", {
+                      name: recipientName,
+                      amount: formatMoney(amountMinor, "GHS"),
+                      status: "completed",
+                    })
+                  }
+                />
+                <View style={{ height: 8 }} />
+                <PrimaryButton label="Done" onPress={back} />
+              </>
+            )}
+          </>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  backRow: { marginBottom: space.sm },
-  back: { color: colors.accentBright, fontWeight: "600" },
-  kicker: {
-    color: colors.cyan,
+  progress: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 18,
+    paddingHorizontal: 8,
+  },
+  progItem: { flex: 1, flexDirection: "row", alignItems: "center" },
+  progDot: { width: 10, height: 10, borderRadius: 5 },
+  progLine: { flex: 1, height: 2, marginHorizontal: 4 },
+  sec: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    marginBottom: 8,
+  },
+  rails: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 14,
+    paddingRight: 8,
+  },
+  rail: {
+    width: 78,
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth * 1.5,
+  },
+  label: {
+    fontSize: 11,
     fontWeight: "700",
-    fontSize: typography.micro,
-    letterSpacing: 1.2,
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    marginBottom: 6,
   },
-  title: {
-    color: colors.text,
-    fontSize: typography.title,
+  input: {
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 15,
+  },
+  recent: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+  },
+  amountRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  amountInput: {
+    flex: 1,
+    fontSize: 32,
     fontWeight: "700",
-    marginTop: 4,
+    letterSpacing: -0.5,
+    paddingVertical: 4,
   },
-  sub: { color: colors.textMuted, marginTop: 6, lineHeight: 20 },
-  label: { color: colors.textDim, fontSize: 12, marginBottom: 4 },
-  value: { color: colors.text, fontSize: 18, fontWeight: "700" },
-  valueSm: { color: colors.text, fontSize: 15, fontWeight: "600" },
-  amount: { color: colors.text, fontSize: 32, fontWeight: "700", marginBottom: 8 },
-  muted: { color: colors.textMuted, marginTop: 2, fontSize: 13 },
-  mt: { marginTop: space.md },
-  row: { flexDirection: "row", gap: 16, marginTop: space.md },
-  warn: { color: colors.warning, marginTop: space.md },
-  ok: { color: colors.success, marginTop: space.md, fontSize: 13 },
-  status: { color: colors.text, marginTop: space.md, lineHeight: 20 },
-  receipt: {
-    color: colors.textMuted,
-    marginTop: 8,
-    fontFamily: "Courier",
-    fontSize: 12,
-    lineHeight: 18,
+  presets: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  preset: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radii.pill,
+    borderWidth: StyleSheet.hairlineWidth,
   },
+  costGrid: { flexDirection: "row", gap: 10, marginTop: 14 },
 });

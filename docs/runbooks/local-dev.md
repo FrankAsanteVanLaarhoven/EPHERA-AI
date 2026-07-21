@@ -63,16 +63,27 @@ curl -s localhost:8092/v1/accounts/user:demo-self:GHS
 curl -s localhost:8092/v1/accounts/user:ama:GHS
 ```
 
-## Mobile
+## Mobile & PWA
 
-Use **Expo development builds**, not Expo Go, once native modules land.
+See **[MOBILE-ACCESS.md](./MOBILE-ACCESS.md)** for:
+
+- Installable **Consumer PWA** (`:3006`) with logo icon on desktop/phone  
+- **Expo Go** / **Expo web** on iOS & Android  
+- LAN IP setup (never use `localhost` on a real phone)
 
 ```bash
-npm run mobile:ios
-npm run mobile:android
+npm run dev:consumer-pwa          # PWA :3006 (0.0.0.0)
+cd apps/mobile && npx expo start --lan   # full app
 ```
 
 Point the app at APIs with `EXPO_PUBLIC_PAYMENTS_URL` and `EXPO_PUBLIC_VOICE_INTENT_URL` when using a physical device.
+
+```bash
+export LAN_IP=$(ipconfig getifaddr en0)
+EXPO_PUBLIC_PAYMENTS_URL=http://$LAN_IP:8090 \
+EXPO_PUBLIC_VOICE_INTENT_URL=http://$LAN_IP:8091 \
+npx expo start --lan
+```
 
 ## Money safety
 

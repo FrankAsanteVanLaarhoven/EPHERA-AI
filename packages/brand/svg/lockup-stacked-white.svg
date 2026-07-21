@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Primary stacked mark: symbol above EPHERA, campaign line underneath.
+  Campaign line is marketing-only — use institutional lockup for banks/regulators.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 220" fill="none" role="img" aria-label="EPHERA Money without limits">
+  <title>EPHERA stacked lockup</title>
+  <g transform="translate(92,8)">
+    <rect x="16" y="20" width="64" height="14" rx="7" fill="#F4F8FF"/>
+    <rect x="16" y="41" width="48" height="14" rx="7" fill="#F4F8FF"/>
+    <rect x="16" y="62" width="64" height="14" rx="7" fill="#F4F8FF"/>
+  </g>
+  <text x="140" y="140" text-anchor="middle"
+    font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+    font-size="34" font-weight="300" letter-spacing="0.26em" fill="#F4F8FF">EPHERA</text>
+  <!-- Campaign line only — not for legal/API/bank materials -->
+  <text x="140" y="172" text-anchor="middle"
+    font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+    font-size="11" font-weight="600" letter-spacing="0.28em" fill="#8B9BB8">MONEY WITHOUT LIMITS</text>
+</svg>

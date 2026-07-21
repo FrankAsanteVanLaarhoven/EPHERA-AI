@@ -1,22 +1,31 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Screen } from "../components/ui";
-import { colors, radii, space, typography } from "../theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { GlassIconButton, IconWell, Screen, type IconName } from "../components/ui";
+import { useTheme } from "../lib/theme-context";
+import { useT } from "../lib/i18n";
+import { space } from "../theme";
 import type { Screen as Route } from "../App";
 
-const ITEMS = [
-  { icon: "✈", title: "Send Money", sub: "To anyone, anywhere", color: "#60A5FA", go: "send" },
-  { icon: "↓", title: "Receive Money", sub: "From anyone", color: "#34D399", go: "listening" },
-  { icon: "▣", title: "Pay Bills", sub: "Airtime, utilities, TV & more", color: "#A78BFA", go: "listening" },
-  { icon: "📱", title: "Buy Airtime & Data", sub: "Top up instantly", color: "#22D3EE", go: "send" },
-  { icon: "🏦", title: "Savings", sub: "Save and grow", color: "#4ADE80", go: "listening" },
-  { icon: "📈", title: "Invest", sub: "Grow your money", color: "#C084FC", go: "listening" },
-  { icon: "👤", title: "Loans", sub: "Instant & flexible", color: "#F472B6", go: "listening" },
-  { icon: "🛡", title: "Insurance", sub: "Protect what matters", color: "#2DD4BF", go: "listening" },
-  { icon: "💳", title: "Cards", sub: "Virtual & physical", color: "#FBBF24", go: "listening" },
-  { icon: "🏪", title: "Merchant Payments", sub: "For businesses", color: "#FB923C", go: "listening" },
-  { icon: "🌍", title: "Remittances", sub: "From diaspora", color: "#38BDF8", go: "listening" },
-  { icon: "···", title: "More", sub: "Explore all features", color: "#94A3B8", go: "voiceMode" },
-] as const;
+const ITEM_DEFS: {
+  icon: IconName;
+  titleKey: string;
+  subKey: string;
+  tone?: "tube" | "accent" | "success" | "cyan" | "warning";
+  go: Route;
+}[] = [
+  { icon: "send", titleKey: "services.send", subKey: "services.sendSub", tone: "accent", go: "send" },
+  { icon: "receive", titleKey: "services.receive", subKey: "services.receiveSub", tone: "success", go: "receive" },
+  { icon: "bolt", titleKey: "services.bills", subKey: "services.billsSub", tone: "warning", go: "bills" },
+  { icon: "phone", titleKey: "services.airtime", subKey: "services.airtimeSub", tone: "cyan", go: "airtime" },
+  { icon: "home", titleKey: "services.savings", subKey: "services.savingsSub", tone: "success", go: "savings" },
+  { icon: "chart", titleKey: "services.invest", subKey: "services.investSub", tone: "accent", go: "invest" },
+  { icon: "credit", titleKey: "services.loans", subKey: "services.loansSub", go: "credit" },
+  { icon: "shield", titleKey: "services.insurance", subKey: "services.insuranceSub", tone: "success", go: "insurance" },
+  { icon: "card", titleKey: "services.cards", subKey: "services.cardsSub", tone: "warning", go: "cards" },
+  { icon: "merchant", titleKey: "services.merchant", subKey: "services.merchantSub", go: "merchant" },
+  { icon: "globe", titleKey: "services.remit", subKey: "services.remitSub", tone: "cyan", go: "crossBorder" },
+  { icon: "mic", titleKey: "services.voice", subKey: "services.voiceSub", go: "voice" },
+];
 
 export default function ServicesScreen({
   go,
@@ -25,13 +34,24 @@ export default function ServicesScreen({
   go: (screen: Route, params?: Record<string, string>) => void;
   back: () => void;
 }) {
+  const insets = useSafeAreaInsets();
+  const { colors, mood, isDark } = useTheme();
+  const t = useT();
+
+  const ITEMS = ITEM_DEFS.map((item) => ({
+    ...item,
+    title: t(item.titleKey),
+    sub: t(item.subKey),
+  }));
+
   return (
-    <Screen>
+    <Screen edges={false} style={{ paddingTop: insets.top + 8, paddingHorizontal: space.lg }}>
       <View style={styles.header}>
-        <Text style={styles.title}>Ephera can help you with</Text>
-        <Pressable onPress={back} style={styles.close}>
-          <Text style={styles.closeText}>✕</Text>
-        </Pressable>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={[styles.kicker, { color: colors.accentBright }]}>{t("services.kicker")}</Text>
+          <Text style={[styles.title, { color: colors.text }]}>{t("services.title")}</Text>
+        </View>
+        <GlassIconButton iconName="close" onPress={back} size={34} label="Close" click="ui_back" />
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
@@ -39,81 +59,79 @@ export default function ServicesScreen({
           {ITEMS.map((item) => (
             <Pressable
               key={item.title}
-              style={styles.tile}
-              onPress={() => go(item.go as Route)}
+              style={[
+                styles.tile,
+                {
+                  backgroundColor: isDark ? "rgba(255,255,255,0.04)" : colors.card,
+                  borderColor: isDark ? mood.edge : colors.border,
+                },
+              ]}
+              onPress={() => go(item.go)}
             >
-              <View style={[styles.iconWrap, { backgroundColor: `${item.color}22` }]}>
-                <Text style={{ fontSize: 16 }}>{item.icon}</Text>
-              </View>
-              <Text style={styles.tileTitle}>{item.title}</Text>
-              <Text style={styles.tileSub}>{item.sub}</Text>
+              <IconWell name={item.icon} size={40} tone={item.tone ?? "tube"} />
+              <Text style={[styles.tileTitle, { color: colors.text }]}>{item.title}</Text>
+              <Text style={[styles.tileSub, { color: colors.textDim }]}>{item.sub}</Text>
             </Pressable>
           ))}
         </View>
+
+        <Pressable
+          style={[styles.profileLink, { backgroundColor: isDark ? "rgba(255,255,255,0.04)" : colors.card, borderColor: colors.border }]}
+          onPress={() => go("profile")}
+        >
+          <IconWell name="user" size={34} />
+          <Text style={[styles.profileLinkText, { color: colors.accentBright }]}>
+            {t("services.profileLink")}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.profileLink, { backgroundColor: isDark ? "rgba(255,255,255,0.04)" : colors.card, borderColor: colors.border }]}
+          onPress={() => go("settings")}
+        >
+          <IconWell name="settings" size={34} />
+          <Text style={[styles.profileLinkText, { color: colors.accentBright }]}>
+            {t("settings.title")} · {t("settings.language")}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.profileLink, { backgroundColor: isDark ? "rgba(255,255,255,0.04)" : colors.card, borderColor: colors.border }]}
+          onPress={() => go("freeze")}
+        >
+          <IconWell name="freeze" size={34} tone="danger" />
+          <Text style={[styles.profileLinkText, { color: colors.danger }]}>
+            {t("services.securityLink")}
+          </Text>
+        </Pressable>
+        <View style={{ height: 40 }} />
       </ScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: space.lg,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "700",
-    flex: 1,
-    paddingRight: 12,
-  },
-  close: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "rgba(18,29,50,0.95)",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  closeText: { color: colors.textMuted, fontSize: 14 },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    paddingBottom: 24,
-  },
+  header: { flexDirection: "row", alignItems: "flex-start", marginBottom: 16 },
+  kicker: { fontSize: 11, fontWeight: "800", letterSpacing: 0.8, textTransform: "uppercase" },
+  title: { fontSize: 22, fontWeight: "700", marginTop: 4 },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   tile: {
-    width: "31%",
+    width: "47%",
     flexGrow: 1,
-    minWidth: 100,
-    backgroundColor: "rgba(12, 21, 38, 0.92)",
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    minWidth: "45%",
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
     padding: 12,
-    minHeight: 120,
+    minHeight: 118,
   },
-  iconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+  tileTitle: { fontWeight: "700", fontSize: 13, marginTop: 10 },
+  tileSub: { fontSize: 11, marginTop: 3, lineHeight: 15 },
+  profileLink: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 10,
+    gap: 12,
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  tileTitle: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: "700",
-    marginBottom: 4,
-  },
-  tileSub: {
-    color: colors.textDim,
-    fontSize: 10,
-    lineHeight: 13,
-  },
+  profileLinkText: { fontWeight: "600", fontSize: 14, flex: 1 },
 });

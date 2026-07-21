@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EPHERA symbol — flat white (operational / dark UI)
+  Master geometry (viewBox 96×96):
+    bar height = 14, gap = 7 (equal optical spacing)
+    end radius = 7 (full capsule)
+    top/bottom width = 64 (x 16–80)
+    middle width = 48 (x 16–64) — E silhouette
+  Clear space: 0.25× symbol height. Min size: 16px digital / 4mm print.
+  Rebuild from clean paths — never image-trace AI renders for legal masters.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none" role="img" aria-label="EPHERA">
+  <title>EPHERA symbol</title>
+  <!-- Top bar -->
+  <rect x="16" y="20" width="64" height="14" rx="7" fill="#F4F8FF"/>
+  <!-- Middle bar (shorter — distinctive E middle) -->
+  <rect x="16" y="41" width="48" height="14" rx="7" fill="#F4F8FF"/>
+  <!-- Bottom bar -->
+  <rect x="16" y="62" width="64" height="14" rx="7" fill="#F4F8FF"/>
+</svg>

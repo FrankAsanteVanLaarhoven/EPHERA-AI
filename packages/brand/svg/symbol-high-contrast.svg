@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- High-contrast a11y mark — pure white / pure black, no mid greys -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none" role="img" aria-label="EPHERA">
+  <title>EPHERA high contrast</title>
+  <rect width="96" height="96" fill="#000000"/>
+  <rect x="16" y="20" width="64" height="14" rx="7" fill="#FFFFFF"/>
+  <rect x="16" y="41" width="48" height="14" rx="7" fill="#FFFFFF"/>
+  <rect x="16" y="62" width="64" height="14" rx="7" fill="#FFFFFF"/>
+</svg>

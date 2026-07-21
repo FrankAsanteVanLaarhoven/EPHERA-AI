@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- EPHERA symbol — single-colour monochrome (currentColor) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none" role="img" aria-label="EPHERA">
+  <title>EPHERA symbol monochrome</title>
+  <path fill="currentColor" d="
+    M18 18 H78 a7 7 0 0 1 0 14 H25 a7 7 0 0 1-7-7 V25 a7 7 0 0 1 0-14 Z"/>
+  <path fill="currentColor" d="
+    M18 41 H68 a7 7 0 0 1 0 14 H28 c-4 0-7-2.5-9-6 c-1.2-2-1.8-4-1-6 c1.2-3 4.5-2 6.5-2 Z"/>
+  <path fill="currentColor" d="
+    M18 64 H78 a7 7 0 0 1 0 14 H25 a7 7 0 0 1-7-7 V71 a7 7 0 0 1 0-14 Z"/>
+</svg>

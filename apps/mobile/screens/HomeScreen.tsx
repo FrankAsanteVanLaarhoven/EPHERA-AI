@@ -1,23 +1,35 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { GlassCard, Screen, SectionTitle } from "../components/ui";
-import { colors, radii, space, typography } from "../theme";
-import { PAYMENTS_URL } from "../lib/config";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Avatar } from "../components/Avatar";
+import {
+  GlassActionButton,
+  GlassCard,
+  GlassIconButton,
+  Screen,
+  SectionTitle,
+} from "../components/ui";
+import { fetchBalance, formatGhs, formatUsdApprox } from "../lib/api";
+import { useProfile } from "../lib/profile";
+import { useTheme } from "../lib/theme-context";
+import { useT } from "../lib/i18n";
+import { colors as themeColors, radii, space } from "../theme";
 import type { Screen as Route } from "../App";
 
-const ACTIONS = [
-  { label: "Send", icon: "✈", go: "send" as const },
-  { label: "Receive", icon: "↓", go: "listening" as const },
-  { label: "Pay", icon: "▣", go: "services" as const },
-  { label: "Cash out", icon: "⌂", go: "services" as const },
-  { label: "More", icon: "···", go: "services" as const },
+const ACTION_DEFS = [
+  { labelKey: "nav.send", icon: "✈", go: "send" as const },
+  { labelKey: "nav.receive", icon: "↓", go: "receive" as const },
+  { labelKey: "nav.pay", icon: "▣", go: "bills" as const },
+  { labelKey: "nav.invest", icon: "📈", go: "invest" as const },
+  { labelKey: "common.more", icon: "···", go: "servicesDrawer" as const },
 ];
 
 const ACTIVITY = [
@@ -64,90 +76,117 @@ export default function HomeScreen({
 }: {
   go: (screen: Route, params?: Record<string, string>) => void;
 }) {
+  const insets = useSafeAreaInsets();
+  const { profile } = useProfile();
+  const { colors } = useTheme();
+  const t = useT();
   const [balance, setBalance] = useState("GH₵ 12,560.80");
   const [usd, setUsd] = useState("≈ $1,245.60 USD");
+  const [walletStatus, setWalletStatus] = useState<string | null>(null);
+  const [hidden, setHidden] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch(
-          `${PAYMENTS_URL}/v1/balances/${encodeURIComponent("user:demo-self:GHS")}`,
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        const minor = Number(data.balanceMinor ?? data.availableMinor ?? 0);
-        if (!minor) return;
-        const ghs = (minor / 100).toLocaleString("en-GH", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        });
-        setBalance(`GH₵ ${ghs}`);
-        setUsd(`≈ $${(minor / 100 / 10.08).toFixed(2)} USD`);
-      } catch {
-        /* design showcase numbers remain */
-      }
-    })();
+  const load = useCallback(async () => {
+    const data = await fetchBalance();
+    if (!data) return;
+    setBalance(formatGhs(data.availableMinor || data.balanceMinor));
+    setUsd(formatUsdApprox(data.availableMinor || data.balanceMinor));
+    setWalletStatus(data.status === "frozen" ? "frozen" : null);
   }, []);
 
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  const ACTIONS = ACTION_DEFS.map((a) => ({ ...a, label: t(a.labelKey) }));
+
+  const displayBalance = hidden ? "GH₵ ••••••" : balance;
+  const displayUsd = hidden ? "≈ $••••" : usd;
+
   return (
-    <Screen edges={false} style={{ paddingTop: 52 }}>
+    <Screen edges={false} style={{ paddingTop: insets.top + 8 }}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => void onRefresh()}
+            tintColor={colors.accentBright}
+          />
+        }
       >
         <View style={styles.topBar}>
-          <Pressable style={styles.menuBtn} onPress={() => go("services")}>
-            <Text style={styles.menuIcon}>☰</Text>
-          </Pressable>
+          <GlassIconButton label="☰" onPress={() => go("servicesDrawer")} size={36} />
           <View style={styles.topRight}>
-            <Pressable style={styles.iconCircle}>
-              <Text>🔔</Text>
-            </Pressable>
-            <LinearGradient
-              colors={["#3B82F6", "#8B5CF6"]}
-              style={styles.avatar}
-            >
-              <Text style={styles.avatarText}>E</Text>
-            </LinearGradient>
+            <View>
+              <GlassIconButton label="⚙" onPress={() => go("settings")} size={36} />
+              <View style={styles.dot} />
+            </View>
+            <Avatar size={36} onPress={() => go("profile")} />
           </View>
         </View>
 
         <View style={styles.pad}>
+          {walletStatus === "frozen" ? (
+            <Pressable style={styles.frozenBanner} onPress={() => go("freeze")}>
+              <Text style={[styles.frozenText, { color: colors.danger }]}>
+                🛡 {t("home.frozenBanner")}
+              </Text>
+            </Pressable>
+          ) : null}
+
           <View style={styles.balanceHeader}>
-            <View>
-              <Text style={styles.totalLabel}>Total balance  👁</Text>
-              <Text style={styles.balance}>{balance}</Text>
-              <Text style={styles.usd}>{usd}</Text>
+            <View style={{ flex: 1 }}>
+              <Pressable
+                style={styles.totalLabelRow}
+                onPress={() => setHidden((h) => !h)}
+              >
+                <Text style={[styles.totalLabel, { color: colors.textMuted }]}>{t("home.totalBalance")}</Text>
+                <Text style={styles.eye}>{hidden ? "👁‍🗨" : "👁"}</Text>
+              </Pressable>
+              <Text style={[styles.balance, { color: colors.text }]} numberOfLines={1} adjustsFontSizeToFit>
+                {displayBalance}
+              </Text>
+              <Text style={styles.usd}>{displayUsd}</Text>
+              <Text style={[styles.greeting, { color: colors.textDim }]}>
+                {t("home.hi", { name: profile.displayName.split(" ")[0] })} · {profile.kycTier}
+              </Text>
             </View>
-            <Pressable style={styles.accountsChip} onPress={() => go("services")}>
-              <Text style={styles.accountsText}>Accounts  ▾</Text>
+            <Pressable style={styles.accountsChip} onPress={() => go("accounts")}>
+              <Text style={[styles.accountsText, { color: colors.textMuted }]}>
+                {t("home.accounts")}  ▾
+              </Text>
             </Pressable>
           </View>
 
           <View style={styles.actionRow}>
             {ACTIONS.map((a) => (
-              <Pressable
+              <GlassActionButton
                 key={a.label}
-                style={styles.action}
+                icon={a.icon}
+                label={a.label}
                 onPress={() => go(a.go)}
-              >
-                <View style={styles.actionCircle}>
-                  <Text style={styles.actionIcon}>{a.icon}</Text>
-                </View>
-                <Text style={styles.actionLabel}>{a.label}</Text>
-              </Pressable>
+              />
             ))}
           </View>
 
-          <SectionTitle title="Recent activity" action="See all" />
+          <SectionTitle title={t("home.recentActivity")} action={t("common.seeAll")} onAction={() => go("activity")} />
           <GlassCard style={{ paddingVertical: 2 }}>
             {ACTIVITY.map((item, i) => (
-              <View
+              <Pressable
                 key={item.name + item.meta}
                 style={[
                   styles.txRow,
                   i === ACTIVITY.length - 1 && { borderBottomWidth: 0 },
                 ]}
+                onPress={() => go("activity")}
               >
                 <View style={[styles.txIcon, { backgroundColor: `${item.color}33` }]}>
                   <Text style={{ color: item.color, fontWeight: "700" }}>
@@ -165,26 +204,31 @@ export default function HomeScreen({
                       { color: item.positive ? colors.success : colors.text },
                     ]}
                   >
-                    {item.amount}
+                    {hidden ? "••••" : item.amount}
                   </Text>
                   {item.tag ? <Text style={styles.txTag}>{item.tag}</Text> : null}
                 </View>
-              </View>
+              </Pressable>
             ))}
           </GlassCard>
 
           <Pressable style={styles.freezeLink} onPress={() => go("freeze")}>
-            <Text style={styles.freezeText}>Freeze wallet  ·  Security</Text>
+            <Text style={[styles.freezeText, { color: colors.textDim }]}>{t("home.freezeLink")}</Text>
           </Pressable>
         </View>
       </ScrollView>
 
-      <View style={styles.askBarWrap}>
-        <Pressable style={styles.askBar} onPress={() => go("listening")}>
-          <LinearGradient colors={["#2563EB", "#7C3AED"]} style={styles.askOrb}>
+      <View style={[styles.askBarWrap, { bottom: Math.max(insets.bottom, 16) + 8 }]}>
+        <Pressable style={styles.askBar} onPress={() => go("voice")}>
+          <LinearGradient
+            colors={["rgba(37,99,235,0.55)", "rgba(124,58,237,0.35)"]}
+            style={styles.askOrb}
+          >
             <Text style={styles.askOrbText}>Ξ</Text>
           </LinearGradient>
-          <Text style={styles.askPlaceholder}>Ask Ephera anything…</Text>
+          <Text style={[styles.askPlaceholder, { color: colors.textDim }]}>
+            {t("home.askEphera")}
+          </Text>
           <Text style={styles.mic}>🎙</Text>
         </Pressable>
       </View>
@@ -193,7 +237,7 @@ export default function HomeScreen({
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingBottom: 110 },
+  scroll: { paddingBottom: 120 },
   pad: { paddingHorizontal: space.lg },
   topBar: {
     flexDirection: "row",
@@ -202,90 +246,68 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     marginBottom: space.md,
   },
-  menuBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    backgroundColor: "rgba(18,29,50,0.95)",
-    alignItems: "center",
-    justifyContent: "center",
+  topRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  dot: {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: themeColors.danger,
+    borderWidth: 1.5,
+    borderColor: themeColors.bg,
+  },
+  frozenBanner: {
+    backgroundColor: "rgba(248,113,113,0.12)",
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "rgba(248,113,113,0.35)",
+    padding: 12,
+    marginBottom: space.md,
   },
-  menuIcon: { color: colors.text, fontSize: 16 },
-  topRight: { flexDirection: "row", alignItems: "center", gap: 10 },
-  iconCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(18,29,50,0.95)",
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarText: { color: "#fff", fontWeight: "700" },
+  frozenText: { color: themeColors.danger, fontSize: 12, fontWeight: "600", lineHeight: 17 },
   balanceHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     marginBottom: space.lg,
   },
-  totalLabel: {
-    color: colors.textMuted,
-    fontSize: 13,
-    marginBottom: 8,
-  },
+  totalLabelRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
+  totalLabel: { color: themeColors.textMuted, fontSize: 13 },
+  eye: { fontSize: 12 },
   balance: {
-    color: colors.text,
+    color: themeColors.text,
     fontSize: 36,
     fontWeight: "700",
     letterSpacing: -0.8,
   },
   usd: {
-    color: colors.textDim,
+    color: themeColors.textDim,
     fontSize: 13,
     marginTop: 4,
   },
+  greeting: {
+    color: themeColors.textDim,
+    fontSize: 12,
+    marginTop: 8,
+    textTransform: "capitalize",
+  },
   accountsChip: {
-    backgroundColor: "rgba(18,29,50,0.95)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     borderRadius: radii.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.16)",
     marginTop: 4,
   },
-  accountsText: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
+  accountsText: { color: themeColors.textMuted, fontSize: 11, fontWeight: "600" },
   actionRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: space.xl,
-  },
-  action: { alignItems: "center", width: 62 },
-  actionCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: "rgba(18,29,50,0.95)",
-    borderWidth: 1,
-    borderColor: "rgba(96,165,250,0.28)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 8,
-  },
-  actionIcon: { color: colors.accentBright, fontSize: 18 },
-  actionLabel: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: "600",
+    marginBottom: space.lg,
+    paddingHorizontal: 2,
   },
   txRow: {
     flexDirection: "row",
@@ -293,7 +315,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 13,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    borderBottomColor: themeColors.border,
   },
   txIcon: {
     width: 42,
@@ -302,37 +324,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  txName: { color: colors.text, fontWeight: "600", fontSize: 14 },
-  txMeta: { color: colors.textDim, fontSize: 11, marginTop: 2 },
+  txName: { color: themeColors.text, fontWeight: "600", fontSize: 14 },
+  txMeta: { color: themeColors.textDim, fontSize: 11, marginTop: 2 },
   txAmount: { fontWeight: "700", fontSize: 14 },
-  txTag: { color: colors.success, fontSize: 10, marginTop: 2 },
+  txTag: { color: themeColors.success, fontSize: 10, marginTop: 2 },
   freezeLink: { marginTop: space.md, alignItems: "center" },
-  freezeText: { color: colors.textDim, fontSize: 12 },
+  freezeText: { color: themeColors.textDim, fontSize: 12 },
   askBarWrap: {
     position: "absolute",
     left: space.lg,
     right: space.lg,
-    bottom: 28,
   },
   askBar: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(12, 21, 38, 0.96)",
+    backgroundColor: "rgba(18, 29, 50, 0.55)",
     borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: "rgba(96,165,250,0.35)",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    gap: 10,
+    borderWidth: StyleSheet.hairlineWidth * 1.5,
+    borderColor: "rgba(147,197,253,0.32)",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 8,
   },
   askOrb: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
   },
-  askOrbText: { color: "#fff", fontWeight: "700", fontSize: 13 },
-  askPlaceholder: { flex: 1, color: colors.textDim, fontSize: 14 },
-  mic: { fontSize: 16 },
+  askOrbText: { color: "#fff", fontWeight: "700", fontSize: 12 },
+  askPlaceholder: { flex: 1, color: themeColors.textDim, fontSize: 13 },
+  mic: { fontSize: 14 },
 });

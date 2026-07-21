@@ -7,17 +7,62 @@
     "scheme": "ephera",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/brand/wordmark-stacked.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#02060F"
+    },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "money.ephera.app"
+      "bundleIdentifier": "money.ephera.app",
+      "icon": "./assets/icon.png",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Allow Ephera to use your photos for your profile picture.",
+        "NSCameraUsageDescription": "Allow Ephera to use the camera for your profile picture and to scan payment QR codes."
+      }
     },
     "android": {
       "package": "money.ephera.app",
       "adaptiveIcon": {
-        "backgroundColor": "#0B0F14"
-      }
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#050B18"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES"
+      ]
     },
-    "plugins": ["expo-asset", "expo-font"],
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "name": "EPHERA Money",
+      "shortName": "EPHERA",
+      "lang": "en",
+      "themeColor": "#050B18",
+      "backgroundColor": "#050B18",
+      "display": "standalone",
+      "orientation": "portrait",
+      "startUrl": "/",
+      "description": "Voice-native financial access — EPHERA Money"
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Ephera to use your photos for your profile picture.",
+          "cameraPermission": "Allow Ephera to use the camera for your profile picture."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Ephera to scan payment QR codes."
+        }
+      ]
+    ],
     "extra": {
       "epheraNote": "Sandbox Expo Go demo. Development builds required for native passkeys."
     }

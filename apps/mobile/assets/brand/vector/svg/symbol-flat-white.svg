@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EPHERA symbol — flat white (operational / dark UI)
+  Master geometry: equal optical bar weight, consistent end radius, aligned left stem.
+  Clear space: 0.25× symbol height on all sides.
+  Minimum size: 16px digital / 4mm print.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none" role="img" aria-label="EPHERA">
+  <title>EPHERA symbol</title>
+  <!-- Optical grid: bars H=14, gap=11, outer radius=7 -->
+  <!-- Top bar -->
+  <path fill="#F4F8FF" d="
+    M18 18
+    H78
+    a7 7 0 0 1 0 14
+    H25
+    a7 7 0 0 1-7-7
+    V25
+    a7 7 0 0 1 0-14
+    Z"/>
+  <!-- Middle bar (shorter right for E silhouette, stronger left hook) -->
+  <path fill="#F4F8FF" d="
+    M18 41
+    H68
+    a7 7 0 0 1 0 14
+    H28
+    c-4 0-7-2.5-9-6
+    c-1.2-2-1.8-4-1-6
+    c1.2-3 4.5-2 6.5-2
+    Z"/>
+  <!-- Bottom bar -->
+  <path fill="#F4F8FF" d="
+    M18 64
+    H78
+    a7 7 0 0 1 0 14
+    H25
+    a7 7 0 0 1-7-7
+    V71
+    a7 7 0 0 1 0-14
+    Z"/>
+</svg>

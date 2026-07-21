@@ -58,6 +58,7 @@ func main() {
 	mux.HandleFunc("GET /v1/transfers/{id}", s.getTransfer)
 	mux.HandleFunc("GET /v1/balances/{ref}", s.balance)
 	mux.HandleFunc("POST /v1/wallet/freeze", s.freeze)
+	mux.HandleFunc("POST /v1/wallet/unfreeze", s.unfreeze)
 
 	log.Printf("EPHERA payments API on %s (temporal %s, ledger %s)", httpAddr, addr, ledgerURL)
 	if err := http.ListenAndServe(httpAddr, withCORS(mux)); err != nil {
@@ -114,6 +115,37 @@ func (s *server) freeze(w http.ResponseWriter, r *http.Request) {
 		"status":  a.Status,
 		"account": a,
 		"message": "Wallet frozen. Outbound transfers blocked.",
+	})
+}
+
+func (s *server) unfreeze(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ExternalRef      string `json:"externalRef"`
+		AuthorisationRef string `json:"authorisationRef"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if body.AuthorisationRef == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error":   "authorisation_required",
+			"message": "Passkey required to unfreeze wallet",
+		})
+		return
+	}
+	if body.ExternalRef == "" {
+		body.ExternalRef = "user:demo-self:GHS"
+	}
+	a, err := s.ledger.Unfreeze(r.Context(), body.ExternalRef, body.AuthorisationRef)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  a.Status,
+		"account": a,
+		"message": "Wallet unfrozen. Outbound transfers restored.",
 	})
 }
 

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Stacked lockup for splash / marketing (use illuminated SVG for glow) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 220" fill="none" role="img" aria-label="EPHERA Money without limits">
+  <title>EPHERA stacked lockup</title>
+  <g transform="translate(92,8)">
+    <path fill="#F4F8FF" d="M18 18 H78 a7 7 0 0 1 0 14 H25 a7 7 0 0 1-7-7 V25 a7 7 0 0 1 0-14 Z"/>
+    <path fill="#F4F8FF" d="M18 41 H68 a7 7 0 0 1 0 14 H28 c-4 0-7-2.5-9-6 c-1.2-2-1.8-4-1-6 c1.2-3 4.5-2 6.5-2 Z"/>
+    <path fill="#F4F8FF" d="M18 64 H78 a7 7 0 0 1 0 14 H25 a7 7 0 0 1-7-7 V71 a7 7 0 0 1 0-14 Z"/>
+  </g>
+  <text x="140" y="140" text-anchor="middle"
+    font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+    font-size="36" font-weight="300" letter-spacing="0.28em" fill="#F4F8FF">EPHERA</text>
+  <!-- Campaign line — not institutional descriptor -->
+  <text x="140" y="172" text-anchor="middle"
+    font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+    font-size="11" font-weight="600" letter-spacing="0.32em" fill="#8B9BB8">MONEY WITHOUT LIMITS</text>
+</svg>

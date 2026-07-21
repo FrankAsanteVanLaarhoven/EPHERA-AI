@@ -75,6 +75,14 @@ func (c *Client) Freeze(ctx context.Context, ref, reason, authRef string) (Accou
 	return a, err
 }
 
+func (c *Client) Unfreeze(ctx context.Context, ref, authRef string) (Account, error) {
+	var a Account
+	err := c.do(ctx, http.MethodPost, "/v1/accounts/"+url.PathEscape(ref)+"/unfreeze", map[string]any{
+		"authorisationRef": authRef,
+	}, &a)
+	return a, err
+}
+
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
 	var rdr io.Reader
 	if body != nil {

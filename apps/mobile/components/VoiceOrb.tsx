@@ -1,42 +1,78 @@
-import { StyleSheet, Text, View, type ViewStyle } from "react-native";
+import { StyleSheet, View, type ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { colors } from "../theme";
+import type { SymbolState } from "../lib/brand-system/tokens";
+import { useTheme } from "../lib/theme-context";
+import { EpheraBars } from "./brand/EpheraBars";
 
 type Props = {
   size?: number;
   listening?: boolean;
-  /** Brand monogram — mockup uses stacked-E mark */
+  symbolState?: SymbolState;
   mark?: "ephera" | "bars";
   style?: ViewStyle;
   showWaves?: boolean;
 };
 
-/** Premium multi-ring EPHERA orb matching product benchmark UI. */
+/** Voice operator HUD — official logo silhouette only, neon tube light. */
 export function VoiceOrb({
   size = 160,
   listening = false,
-  mark = "ephera",
+  symbolState,
+  mark = "bars",
   style,
   showWaves = true,
 }: Props) {
+  const { mood, isDark } = useTheme();
   const s = size;
+  const liveState: SymbolState =
+    symbolState ?? (listening ? "listening" : "idle");
+  const tube = mood.tube;
+
   return (
-    <View style={[{ width: s * 1.55, height: s * 1.2, alignItems: "center", justifyContent: "center" }, style]}>
-      {/* Horizontal sound waves */}
+    <View
+      style={[
+        {
+          width: s * 1.55,
+          height: s * 1.2,
+          alignItems: "center",
+          justifyContent: "center",
+          shadowColor: mood.halo,
+          shadowOpacity: isDark ? 0.55 : 0.25,
+          shadowRadius: 28,
+          shadowOffset: { width: 0, height: 0 },
+        },
+        style,
+      ]}
+    >
       {showWaves ? (
         <>
-          <View style={[styles.wave, { width: s * 1.45, height: s * 0.55, opacity: listening ? 0.55 : 0.28 }]} />
-          <View style={[styles.wave, { width: s * 1.25, height: s * 0.4, opacity: listening ? 0.4 : 0.18 }]} />
+          <View
+            style={[
+              styles.wave,
+              {
+                width: s * 1.45,
+                height: s * 0.55,
+                opacity: listening ? 0.55 : 0.22,
+                borderColor: `${tube}55`,
+              },
+            ]}
+          />
+          <View
+            style={[
+              styles.wave,
+              {
+                width: s * 1.25,
+                height: s * 0.4,
+                opacity: listening ? 0.4 : 0.14,
+                borderColor: `${tube}40`,
+              },
+            ]}
+          />
         </>
       ) : null}
 
-      {/* Outer glow disc */}
       <LinearGradient
-        colors={
-          listening
-            ? ["rgba(34,211,238,0.35)", "rgba(59,130,246,0.12)", "transparent"]
-            : ["rgba(59,130,246,0.4)", "rgba(29,78,216,0.15)", "transparent"]
-        }
+        colors={[`${tube}40`, `${tube}12`, "transparent"]}
         style={[
           styles.glow,
           {
@@ -47,7 +83,6 @@ export function VoiceOrb({
         ]}
       />
 
-      {/* Outer ring */}
       <View
         style={[
           styles.ring,
@@ -55,12 +90,11 @@ export function VoiceOrb({
             width: s,
             height: s,
             borderRadius: s / 2,
-            borderColor: listening ? "rgba(34,211,238,0.65)" : "rgba(96,165,250,0.55)",
+            borderColor: listening ? tube : mood.edge,
           },
         ]}
       />
 
-      {/* Mid ring */}
       <View
         style={[
           styles.ringMid,
@@ -68,14 +102,17 @@ export function VoiceOrb({
             width: s * 0.82,
             height: s * 0.82,
             borderRadius: (s * 0.82) / 2,
-            borderColor: listening ? "rgba(139,92,246,0.5)" : "rgba(59,130,246,0.35)",
+            borderColor: `${tube}40`,
           },
         ]}
       />
 
-      {/* Core */}
       <LinearGradient
-        colors={["#2563EB", "#1D4ED8", "#1E3A8A"]}
+        colors={
+          isDark
+            ? ["rgba(30,48,90,0.95)", "rgba(12,22,44,0.98)", "rgba(6,10,22,1)"]
+            : ["#E8F0FE", "#C7D7F5", "#A8C0EC"]
+        }
         start={{ x: 0.2, y: 0 }}
         end={{ x: 0.8, y: 1 }}
         style={[
@@ -84,25 +121,16 @@ export function VoiceOrb({
             width: s * 0.52,
             height: s * 0.52,
             borderRadius: (s * 0.52) / 2,
+            borderColor: mood.edge,
+            shadowColor: mood.halo,
+            shadowOpacity: 0.7,
+            shadowRadius: 20,
+            shadowOffset: { width: 0, height: 0 },
           },
         ]}
       >
-        {mark === "bars" ? (
-          <View style={styles.bars}>
-            <View style={[styles.bar, { height: 10 }]} />
-            <View style={[styles.bar, { height: 16 }]} />
-            <View style={[styles.bar, { height: 12 }]} />
-          </View>
-        ) : (
-          <View style={styles.monoWrap}>
-            <Text style={[styles.mono, { fontSize: s * 0.14 }]}>E</Text>
-            <View style={styles.monoLines}>
-              <View style={styles.monoLine} />
-              <View style={styles.monoLine} />
-              <View style={styles.monoLine} />
-            </View>
-          </View>
-        )}
+        {/* Official logo shape only */}
+        <EpheraBars state={liveState} size={s * 0.3} mode="flatWhite" />
       </LinearGradient>
     </View>
   );
@@ -126,48 +154,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(191, 219, 254, 0.45)",
-    shadowColor: "#3B82F6",
-    shadowOpacity: 0.7,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 10,
-  },
-  monoWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-  },
-  mono: {
-    color: colors.white,
-    fontWeight: "200",
-    letterSpacing: 1,
-  },
-  monoLines: {
-    gap: 2.5,
-    justifyContent: "center",
-  },
-  monoLine: {
-    width: 11,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: "rgba(255,255,255,0.92)",
-  },
-  bars: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-  },
-  bar: {
-    width: 3,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.95)",
   },
   wave: {
     position: "absolute",
     borderRadius: 999,
     borderWidth: 1.2,
-    borderColor: "rgba(56, 189, 248, 0.35)",
     backgroundColor: "transparent",
   },
 });

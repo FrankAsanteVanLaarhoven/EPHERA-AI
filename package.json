@@ -20,6 +20,8 @@
     "dev:merchant": "npm run dev -w @ephera/merchant-web",
     "dev:consumer-pwa": "npm run dev -w @ephera/consumer-pwa",
     "mobile:start": "npm run start -w @ephera/mobile",
+    "mobile:lan": "npm run start:lan -w @ephera/mobile",
+    "mobile:web": "npm run web -w @ephera/mobile",
     "mobile:ios": "npm run ios -w @ephera/mobile",
     "mobile:android": "npm run android -w @ephera/mobile",
     "infra:up": "docker compose -f infrastructure/docker-compose.yml up -d",

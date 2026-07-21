@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EPHERA symbol — neon tube (operational dark HUD)
+  Crispy neon white standard. Swap fill to mood RGB for client branding.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none" role="img" aria-label="EPHERA">
+  <title>EPHERA neon tube</title>
+  <defs>
+    <filter id="tube" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="1.6" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#tube)" fill="#F4F8FF">
+    <rect x="16" y="20" width="64" height="14" rx="7"/>
+    <rect x="16" y="41" width="48" height="14" rx="7"/>
+    <rect x="16" y="62" width="64" height="14" rx="7"/>
+  </g>
+</svg>

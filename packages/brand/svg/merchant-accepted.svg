@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Merchant acceptance mark — "EPHERA Accepted Here" -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" fill="none" role="img" aria-label="EPHERA Accepted Here">
+  <title>EPHERA Accepted Here</title>
+  <rect width="320" height="80" rx="12" fill="#050B18"/>
+  <rect x="16" y="23" width="28" height="6" rx="3" fill="#F4F8FF"/>
+  <rect x="16" y="33" width="21" height="6" rx="3" fill="#F4F8FF"/>
+  <rect x="16" y="43" width="28" height="6" rx="3" fill="#F4F8FF"/>
+  <text x="56" y="36"
+    font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+    font-size="16" font-weight="600" letter-spacing="0.12em" fill="#F4F8FF">EPHERA</text>
+  <text x="56" y="56"
+    font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+    font-size="11" font-weight="500" letter-spacing="0.06em" fill="#8B9BB8">ACCEPTED HERE</text>
+</svg>

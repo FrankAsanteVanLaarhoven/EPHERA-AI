@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Verified badge — "Verified by EPHERA" -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 48" fill="none" role="img" aria-label="Verified by EPHERA">
+  <title>Verified by EPHERA</title>
+  <rect width="240" height="48" rx="24" fill="rgba(52,211,153,0.14)" stroke="#34D399" stroke-width="1"/>
+  <circle cx="24" cy="24" r="10" fill="#34D399"/>
+  <path d="M19 24 l3.5 3.5 L29 20" stroke="#050B18" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <text x="42" y="30"
+    font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+    font-size="13" font-weight="600" fill="#34D399">Verified by EPHERA</text>
+</svg>

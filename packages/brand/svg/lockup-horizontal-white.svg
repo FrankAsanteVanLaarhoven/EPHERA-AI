@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Horizontal lockup: symbol left + custom E + PHERA wordmark
+  Operational dark UI. Min wordmark height ~14px.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 96" fill="none" role="img" aria-label="EPHERA">
+  <title>EPHERA horizontal lockup</title>
+  <!-- Symbol -->
+  <rect x="16" y="20" width="64" height="14" rx="7" fill="#F4F8FF"/>
+  <rect x="16" y="41" width="48" height="14" rx="7" fill="#F4F8FF"/>
+  <rect x="16" y="62" width="64" height="14" rx="7" fill="#F4F8FF"/>
+  <!-- Custom E matching three-bar symbol (aligned optical weight) -->
+  <g fill="#F4F8FF">
+    <rect x="112" y="30" width="36" height="7" rx="3.5"/>
+    <rect x="112" y="44.5" width="26" height="7" rx="3.5"/>
+    <rect x="112" y="59" width="36" height="7" rx="3.5"/>
+  </g>
+  <!-- PHERA — light tracking, credible institutional weight -->
+  <text x="158" y="62"
+    font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
+    font-size="34" font-weight="300" letter-spacing="0.2em" fill="#F4F8FF">PHERA</text>
+</svg>

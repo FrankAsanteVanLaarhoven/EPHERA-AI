@@ -35,7 +35,7 @@ export default function VoiceModeScreen({ go }: { go: (screen: Route) => void })
         <PrimaryButton
           label="Got it, let's go"
           icon="🎙"
-          onPress={() => go("listening")}
+          onPress={() => go("voice")}
         />
       </View>
     </Screen>
