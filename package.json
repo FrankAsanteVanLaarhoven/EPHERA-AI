@@ -2,7 +2,7 @@
   "name": "ephera",
   "private": true,
   "version": "0.1.0",
-  "description": "EPHERA Money — voice-native mobile money and financial access platform",
+  "description": "EPHERA Money — enterprise voice-native mobile money, banking and commerce platform for Africa. Installable PWA, Expo mobile, double-entry ledger, Temporal payments, passkey authorisation.",
   "workspaces": [
     "apps/merchant-web",
     "apps/consumer-pwa",
