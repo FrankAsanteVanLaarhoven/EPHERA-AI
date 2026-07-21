@@ -3,37 +3,20 @@ import { store } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
+// Mutating routes were removed at G2-C.
+//
+// This console had no server-side authentication on any route, took the acting
+// identity from the request body defaulting to "superadmin", and enforced its
+// role model on one route in nineteen (D-06, D-07, D-12). Two of its routes
+// reached the money path using a hardcoded authorisation literal.
+//
+// State-changing operations now belong to platform-control-bff, where they are
+// authenticated from a signed operator session, permissioned server-side,
+// require a second operator, and are written to an append-only hash-chained
+// audit log. Until this console is rebuilt against that service it is
+// read-only: removing the routes removes the exposure, rather than leaving it
+// in place behind a promise.
+
 export async function GET() {
   return NextResponse.json({ items: store.users });
-}
-
-export async function PATCH(req: Request) {
-  const body = (await req.json()) as {
-    id: string;
-    status: "active" | "frozen" | "suspended" | "pending";
-    actor?: string;
-  };
-  const u = store.setUserStatus(body.id, body.status, body.actor || "superadmin");
-  if (!u) return NextResponse.json({ error: "not_found" }, { status: 404 });
-
-  // Best-effort live freeze via payments API for demo user
-  if (body.id === "user_demo" && (body.status === "frozen" || body.status === "active")) {
-    const payments = process.env.PAYMENTS_URL || "http://localhost:8090";
-    try {
-      const path = body.status === "frozen" ? "/v1/wallet/freeze" : "/v1/wallet/unfreeze";
-      await fetch(`${payments}${path}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          externalRef: "user:demo-self:GHS",
-          authorisationRef: "passkey_admin_console_demo",
-        }),
-        signal: AbortSignal.timeout(2500),
-      });
-    } catch {
-      /* sandbox offline ok */
-    }
-  }
-
-  return NextResponse.json(u);
 }

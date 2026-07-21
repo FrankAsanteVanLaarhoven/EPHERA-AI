@@ -109,3 +109,23 @@ func (s *Service) FinishAuthorisation(
 	}
 	return s.wa.ValidateLogin(user, sess, parsed)
 }
+
+// BeginOperatorLogin starts a login ceremony. Unlike an authorisation ceremony
+// there is no transaction to bind to: this proves who someone is, and proves
+// nothing about what they may do. Authorisation is the control plane's job, and
+// it re-reads roles from its own database rather than trusting this session.
+func (s *Service) BeginOperatorLogin(user webauthn.User) (*protocol.CredentialAssertion, *webauthn.SessionData, error) {
+	if len(user.WebAuthnCredentials()) == 0 {
+		return nil, nil, ErrNoCredential
+	}
+	return s.wa.BeginLogin(user, webauthn.WithUserVerification(protocol.VerificationRequired))
+}
+
+// FinishOperatorLogin verifies a login assertion.
+func (s *Service) FinishOperatorLogin(user webauthn.User, sess webauthn.SessionData, body io.Reader) (*webauthn.Credential, error) {
+	parsed, err := protocol.ParseCredentialRequestResponseBody(body)
+	if err != nil {
+		return nil, fmt.Errorf("parse assertion: %w", err)
+	}
+	return s.wa.ValidateLogin(user, sess, parsed)
+}

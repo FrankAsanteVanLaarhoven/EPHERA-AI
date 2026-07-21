@@ -166,76 +166,39 @@ export function AdminShell() {
 
   function login(e: React.FormEvent) {
     e.preventDefault();
-    // Sandbox gate — replace with SSO / passkeys in production
-    if (password === "ephera-super-admin" || password === "superadmin") {
-      sessionStorage.setItem(AUTH_KEY, "1");
-      setAuthed(true);
-    } else {
-      flash("Invalid credentials");
-    }
+    // The previous gate compared a password in the browser against a value
+    // printed on this very screen and in the README, and the server never saw
+    // it (D-06). It is gone rather than left in place looking like protection.
+    //
+    // Operator authentication is a passkey ceremony against identity-access,
+    // which mints a session that platform-control-bff verifies. This console
+    // does not yet perform it, so it opens read-only and can change nothing.
+    sessionStorage.setItem(AUTH_KEY, "1");
+    setAuthed(true);
   }
 
-  async function patchFeature(id: string, enabled: boolean, rolloutPercent?: number) {
-    const r = await fetch("/api/features", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id, enabled, rolloutPercent }),
-    });
-    if (r.ok) {
-      flash(`Feature ${id} updated`);
-      void loadAll();
-    }
+  async function patchFeature(id: string, _enabled: boolean, _rolloutPercent?: number) {
+    flash("Feature changes move through platform-control-bff: propose, second operator approves, then apply.");
   }
 
-  async function patchProvider(id: string, status: Provider["status"]) {
-    await fetch("/api/providers", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id, status }),
-    });
-    flash(`Provider ${id} → ${status}`);
-    void loadAll();
+  async function patchProvider(id: string, _status: Provider["status"]) {
+    flash("Provider status changes move through platform-control-bff and require a second operator.");
   }
 
-  async function patchUser(id: string, status: UserRow["status"]) {
-    await fetch("/api/users", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id, status }),
-    });
-    flash(`User ${id} → ${status}`);
-    void loadAll();
+  async function patchUser(id: string, _status: UserRow["status"]) {
+    flash("Customer status changes move through platform-control-bff and require a second operator.");
   }
 
-  async function patchMandate(id: string, status: Mandate["status"]) {
-    await fetch("/api/mandates", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id, status }),
-    });
-    flash(`Mandate ${id} → ${status}`);
-    void loadAll();
+  async function patchMandate(id: string, _status: Mandate["status"]) {
+    flash("Mandate changes move through platform-control-bff and require a second operator.");
   }
 
-  async function patchAi(id: string, status: AiModel["status"]) {
-    await fetch("/api/ai", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id, status }),
-    });
-    flash(`AI model ${id} → ${status}`);
-    void loadAll();
+  async function patchAi(id: string, _status: AiModel["status"]) {
+    flash("Model status changes move through platform-control-bff and require a second operator.");
   }
 
   async function runAction(action: string) {
-    const r = await fetch("/api/actions", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action }),
-    });
-    const j = await r.json();
-    flash(j.message || "Action done");
-    void loadAll();
+    flash("Break-glass actions move through platform-control-bff: they are proposed, approved by a second operator, and audited.");
   }
 
   if (!authed) {
@@ -265,7 +228,8 @@ export function AdminShell() {
             Enter control plane
           </button>
           <p className="footer-note">
-            Sandbox credentials: <span className="mono">ephera-super-admin</span>
+            Read-only. State changes are made in platform-control-bff, which requires
+            a passkey-authenticated operator session and a second approver.
           </p>
           {toast && <p style={{ color: "var(--danger)", fontSize: 13 }}>{toast}</p>}
         </form>

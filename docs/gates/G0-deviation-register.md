@@ -34,7 +34,7 @@ Reduced at G2-A and G2-B — see [`G2-report.md`](G2-report.md).
 | ID | Sev | State |
 | --- | --- | --- |
 | D-01 | S1 | **Reduced, not closed.** The authorisation reference is now a signed, transaction-bound, single-use grant that the ledger verifies itself and consumes; forgery, repointing and replay are closed. WebAuthn registration and assertion verification exist and are tested, with the assertion challenge set to the transfer's binding digest. The consumer surface now performs the browser ceremony. What remains is that no real device has completed one — the browser path is unverified outside typecheck and build here, and the mobile app has no passkey at all. Closes when a real device signs a real transfer |
-| D-07 | S1 | The console's hardcoded literal no longer authorises anything at the ledger. The console still has no authentication of its own (G2-C) |
+| D-07 | S1 | **Closed.** The hardcoded literal stopped authorising anything at G2-A, and at G2-C the route that used it (`temporal/start`) was deleted along with every other mutating console handler |
 | D-31 | S1 | The browser surface can no longer mint its own reference; it obtains a grant. Subject to the same G2-B caveat |
 | D-32 | S1 | The mock no longer produces anything the ledger accepts. It remains as the on-device confirmation step until the client ceremonies land |
 | D-34 | S1 | The idempotency key is derived from the intent and amount rather than the clock, so a retry is the same transfer. A repeat also now fails on grant single use |
@@ -46,11 +46,11 @@ unauthenticated surface is still live and these stay open.
 
 | ID | Sev | State |
 | --- | --- | --- |
-| D-06 | S1 | `platform-control-bff` requires an authenticated operator session on every route and has no password anywhere. Open until the console is rewired and its 19 routes deleted |
-| D-12 | S1 | Roles come from the signed session and are re-read from the database; a validly signed token claiming a role it does not hold is refused. Open until the console uses it |
+| D-06 | S1 | **Closed.** `platform-control-bff` requires an authenticated operator session on every route and has no password anywhere. Operators obtain sessions by passkey. The console's mutating handlers are all removed and its published password gate is deleted, so there is no unauthenticated state-changing surface left |
+| D-12 | S1 | **Closed.** Roles come from the signed session and are re-read from the database; a validly signed token claiming a role it does not hold is refused. The console's body-supplied `actor` paths are deleted |
 | D-13 | S2 | Maker-checker enforced in code and by a database constraint: the proposer cannot approve, at any severity. Reasons are mandatory |
-| D-14 | S2 | Audit is append-only and hash-chained, with `UPDATE`/`DELETE` refused by trigger and a chain verifier. Actor comes from the session. Open until the console writes to it |
-| D-15 | S2 | Operator state, approvals and audit are in Postgres. Open until the console stops using its in-memory store |
+| D-14 | S2 | **Closed** for the control plane: audit is append-only and hash-chained, `UPDATE`/`DELETE` refused by trigger, chain verifiable, actor from the session. The console's mutable 200-entry array no longer records anything, because it no longer mutates anything |
+| D-15 | S2 | Operator state, approvals and audit are in Postgres. **Still open**: the console continues to read its own in-memory seed data, and the provider portal is untouched |
 
 Partially addressed, decision open:
 

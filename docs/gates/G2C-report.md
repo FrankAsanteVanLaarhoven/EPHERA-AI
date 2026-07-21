@@ -3,8 +3,10 @@
 **Scope:** the third G2 increment. Operators authenticate, permissions are
 enforced server-side from a signed session, sensitive changes need a second
 operator, and the audit trail is append-only and hash-chained.
-**Verdict:** PASS WITH LIMITATIONS — the control plane exists and is tested; the
-console has not been migrated onto it. See section 9.
+**Verdict:** PASS WITH LIMITATIONS — the control plane exists and is tested,
+operators can obtain sessions with a passkey, and the console's unauthenticated
+mutating surface has been removed. The console has not yet been rebuilt against
+the control plane. See section 9.
 
 ## 1. Evidence and assumptions
 
@@ -34,6 +36,11 @@ the service.
 | `services/platform-control-bff/internal/store/` | New. Persistence, maker-checker, audit chain and chain verification |
 | `services/platform-control-bff/cmd/api/` | New. HTTP surface where every route authenticates |
 | `services/platform-control-bff/cmd/api/control_test.go` | New. 12 negative authorisation tests |
+| `services/identity-access/cmd/api/operator_routes.go` | New (C-ii). Operator login by passkey, minting a session |
+| `services/identity-access/migrations/002_operator_sessions.sql` | New (C-ii). Login is a third ceremony type, carrying no transaction binding |
+| `apps/admin-console/src/app/api/**` | **All mutating handlers removed**; `temporal/start` deleted outright |
+| `apps/admin-console/src/components/AdminShell.tsx` | Password gate removed; mutating helpers explain where the operation went |
+| `README.md`, `docs/product/ADMIN-CONSOLE.md` | The published sandbox password is gone |
 | `scripts/db-migrate.sh`, `.github/workflows/ci.yml`, `package.json`, `docs/runbooks/local-dev.md` | Wiring |
 
 ## 3. Migrations and schemas
@@ -58,6 +65,10 @@ the service.
 | --- | --- |
 | `go test ./...` in `services/authgrant` | ok — 16 tests (9 grant, 7 session) |
 | `go test ./...` in `services/platform-control-bff` | ok — 12 tests |
+| `go test ./...` in `services/identity-access` | ok — 15 tests (3 new: operator login) |
+| `npm run typecheck` and `build` for all four applications | ok |
+| `grep` for mutating handlers in the console | 0 remain |
+| `grep` for the forged authorisation literal | only in tests asserting it is refused |
 | `go vet` in both | clean |
 | `./scripts/db-migrate.sh platform-control-bff` | applied; re-run a no-op |
 
@@ -100,13 +111,16 @@ because a test verifies the chain rather than assuming it.
 
 ## 6. Mitigations and residual risks
 
-- **The console has not been migrated.** `apps/admin-console` still serves its
-  own 19 unauthenticated routes against in-memory state. Until it is rewired to
-  call this service and its own routes are deleted, **D-06, D-12, D-14 and D-15
-  remain open** — the control plane is correct but not yet in the path.
-- **Sessions are not yet issued.** `identity-access` does not have the operator
-  session endpoint, so tokens exist only in tests. Wiring it is small — the
-  passkey ceremony already exists — but until then no operator can obtain one.
+- **The console is read-only, not migrated.** Every mutating handler has been
+  removed and `temporal/start` — the route that moved money with a hardcoded
+  authorisation literal — is deleted. The exposure is gone. What has not
+  happened is the rebuild: the console does not yet perform an operator login or
+  call the control plane, so the propose/approve workflow has no interface. The
+  console reads its own in-memory seed data, so **D-15 remains open**.
+- The password gate is removed rather than replaced. It compared a string in the
+  browser against a value printed on the login screen and in the README; the
+  server never saw it. Leaving it would have implied protection that never
+  existed.
 - **Applying a change records authorisation, it does not perform the effect.**
   Freezing a wallet or flipping a flag still has to be carried out by the owning
   service. The approval gate is real; the downstream call is the next increment.
@@ -148,8 +162,8 @@ unauthenticated surface described in the G0 baseline is still live.
 
 ### Next
 
-- **G2-C(ii)** — issue operator sessions from identity-access after a passkey
-  assertion, migrate the console onto this service, delete its 19 routes and its
-  in-memory store. That is what closes D-06, D-12, D-14 and D-15.
+- **G2-C(ii) remainder** — rebuild the console against the control plane: an
+  operator login, a propose/approve interface, and reads served by the control
+  plane rather than an in-memory seed. That closes D-15.
 - **G2-C(iii)** — have `apply` call the owning service, so an approved change has
   an effect and the kill switch stops being theatre (D-17).

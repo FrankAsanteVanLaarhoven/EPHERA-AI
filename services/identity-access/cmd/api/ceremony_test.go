@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ephera/authgrant"
+	"github.com/ephera/authgrant/session"
 	"github.com/ephera/identity-access/internal/passkey"
 	"github.com/ephera/identity-access/internal/store"
 	"github.com/ephera/identity-access/internal/webauthntest"
@@ -309,5 +310,73 @@ func TestChallengeRefusedWithoutAPasskey(t *testing.T) {
 	code, out := h.post(t, "/v1/grants/challenge", h.grantBody(h.binding("tx_"+uuid.NewString())))
 	if code != http.StatusNotFound {
 		t.Fatalf("challenge without passkey returned %d %v, expected 404", code, out)
+	}
+}
+
+// An operator logs in with a passkey and receives a session the control plane
+// will accept. There is no password in this path.
+func TestOperatorLoginMintsAVerifiableSession(t *testing.T) {
+	h := newHarness(t, false)
+	auth := h.registerPasskey(t)
+
+	code, ch := h.post(t, "/v1/operators/session/challenge", map[string]any{"subject": h.subject})
+	if code != http.StatusOK {
+		t.Fatalf("session/challenge: %d %v", code, ch)
+	}
+	challenge := ch["challenge"].(string)
+
+	assertionBytes, err := auth.AssertionResponse(challenge, nil)
+	if err != nil {
+		t.Fatalf("assertion: %v", err)
+	}
+	var assertion map[string]any
+	_ = json.Unmarshal(assertionBytes, &assertion)
+
+	code, out := h.post(t, "/v1/operators/session", map[string]any{
+		"subject": h.subject, "challenge": challenge, "assertion": assertion,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("operator session: %d %v", code, out)
+	}
+	p, err := session.Verify(h.pub, out["session"].(string), time.Now())
+	if err != nil {
+		t.Fatalf("minted session does not verify: %v", err)
+	}
+	if p.Subject != h.subject || p.Method != session.MethodPasskey {
+		t.Fatalf("session says subject %q method %q", p.Subject, p.Method)
+	}
+}
+
+// An operator with no registered passkey cannot obtain a session at all.
+func TestOperatorLoginRefusedWithoutAPasskey(t *testing.T) {
+	h := newHarness(t, false)
+	code, out := h.post(t, "/v1/operators/session/challenge", map[string]any{"subject": h.subject})
+	if code != http.StatusNotFound {
+		t.Fatalf("login without a passkey returned %d %v, expected 404", code, out)
+	}
+}
+
+// A login challenge cannot be spent as a payment authorisation, or vice versa.
+func TestOperatorChallengeCannotAuthoriseAPayment(t *testing.T) {
+	h := newHarness(t, false)
+	auth := h.registerPasskey(t)
+
+	code, ch := h.post(t, "/v1/operators/session/challenge", map[string]any{"subject": h.subject})
+	if code != http.StatusOK {
+		t.Fatalf("challenge: %d %v", code, ch)
+	}
+	challenge := ch["challenge"].(string)
+	assertionBytes, _ := auth.AssertionResponse(challenge, nil)
+	var assertion map[string]any
+	_ = json.Unmarshal(assertionBytes, &assertion)
+
+	b := h.binding("tx_" + uuid.NewString())
+	body := h.grantBody(b)
+	body["challenge"] = challenge
+	body["assertion"] = assertion
+
+	code, out := h.post(t, "/v1/grants/passkey", body)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("login challenge spent as a payment authorisation returned %d %v, expected 401", code, out)
 	}
 }

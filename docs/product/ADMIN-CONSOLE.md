@@ -29,7 +29,7 @@ Remote control plane for the entire EPHERA Money platform:
 Password (local only):
 
 ```text
-ephera-super-admin
+(removed — the console no longer has a password, and is read-only pending migration onto platform-control-bff)
 ```
 
 Replace with SSO + passkeys + IP allowlists before any shared environment.

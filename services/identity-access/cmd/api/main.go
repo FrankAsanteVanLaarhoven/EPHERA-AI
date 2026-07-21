@@ -104,6 +104,8 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/grants/challenge", s.grantChallenge)
 	mux.HandleFunc("POST /v1/grants/passkey", s.mintWithPasskey)
 	mux.HandleFunc("POST /v1/grants", s.mintGrant)
+	mux.HandleFunc("POST /v1/operators/session/challenge", s.operatorSessionChallenge)
+	mux.HandleFunc("POST /v1/operators/session", s.operatorSession)
 	return withCORS(mux)
 }
 
