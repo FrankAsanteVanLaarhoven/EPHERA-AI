@@ -15,8 +15,9 @@
   },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present && npm run test:ledger",
-    "test:ledger": "cd native/financial-core && cargo test",
+    "test": "npm run test --workspaces --if-present && npm run test:financial-core",
+    "test:financial-core": "cd native/financial-core && cargo test",
+    "test:ledger": "cd services/ledger && go test ./...",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "dev:merchant": "npm run dev -w @ephera/merchant-web",

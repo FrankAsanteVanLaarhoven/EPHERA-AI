@@ -13,7 +13,31 @@ own user interface) and what the code does.
 | **S2** | Blocks the gate it belongs to. |
 | **S3** | Fix in the normal course of the owning gate. |
 
-Counts: **S1 — 14**, **S2 — 16**, **S3 — 14**, total **44**.
+Counts at G0: **S1 — 14**, **S2 — 16**, **S3 — 14**, total **44**.
+
+## Status
+
+Closed at G1 — see [`G1-report.md`](G1-report.md) for evidence.
+
+| ID | Sev | Closed by |
+| --- | --- | --- |
+| D-03 | S1 | Ledger request validation, plus a positive-amount constraint on postings. Reproduced live, then covered by unit and integration tests |
+| D-04 | S1 | Tautological constraint replaced by a type-aware balance-floor trigger. Customer accounts cannot go negative; system accounts still can |
+| D-05 | S1 | Deferred constraint triggers enforce that every journal entry has at least two legs and nets to zero per currency |
+| D-20 | S2 | Continuous integration now type-checks and builds all four applications, runs ledger tests against Postgres, and runs the voice test file |
+| D-21 | S2 | Versioned migrations with a `schema_migrations` table, checksums and drift detection. Re-running is a no-op |
+| D-22 | S3 | The freeze path no longer discards its evidence-write error; a freeze that cannot be evidenced does not commit |
+
+Partially addressed, decision open:
+
+| ID | Sev | State |
+| --- | --- | --- |
+| D-11 | S1 | The crate is now labelled in source and in continuous integration as specification that is **not** in the money path, and the misleading `test:ledger` script name now points at the real ledger tests. Whether to link it, keep it as specification, or retire it remains open |
+
+Everything else is unchanged from the G0 baseline. In particular **D-01 and
+D-02 remain open** — the authorisation reference is still an unverified string
+and the ledger still authenticates no caller. G1 hardened the ledger against
+malformed input; it did not give it an identity boundary. That is G2.
 
 ## Register
 

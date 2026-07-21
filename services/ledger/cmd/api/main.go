@@ -173,6 +173,11 @@ func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
 
 func writeStoreErr(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, store.ErrInvalidRequest):
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":   "invalid_request",
+			"message": err.Error(),
+		})
 	case errors.Is(err, store.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 	case errors.Is(err, store.ErrInsufficientFunds):

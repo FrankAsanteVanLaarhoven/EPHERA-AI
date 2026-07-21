@@ -33,9 +33,31 @@ npm run db:migrate
 
 ```bash
 docker compose -f infrastructure/docker-compose.yml ps
-npm run test:ledger
 npm install
 npm run test -w @ephera/validation
+npm run test:financial-core   # specification crate, not the ledger service
+```
+
+### Migrations
+
+`npm run db:migrate` applies each file in `services/ledger/migrations` exactly
+once and records it in `schema_migrations` with a checksum. Re-running is a
+no-op. Editing an already-applied migration fails the run — add a new file
+instead.
+
+Where the `docker` on PATH is a wrapper without compose support, pass the real
+binary: `DOCKER=/usr/bin/docker npm run db:migrate`.
+
+### Ledger tests
+
+Unit tests run anywhere. The schema-invariant tests need a migrated database
+and skip without one:
+
+```bash
+npm run db:migrate
+cd services/ledger
+LEDGER_TEST_DATABASE_URL='postgres://ephera:ephera_dev_only@localhost:5433/ephera_ledger?sslmode=disable' \
+  go test ./...
 ```
 
 Temporal UI: http://localhost:8088  

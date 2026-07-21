@@ -16,6 +16,7 @@ var (
 	ErrInsufficientFunds = errors.New("insufficient funds")
 	ErrFrozen            = errors.New("account frozen")
 	ErrUnauthorised      = errors.New("missing authorisation")
+	ErrInvalidRequest    = errors.New("invalid request")
 )
 
 type Store struct {
@@ -87,12 +88,17 @@ func (s *Store) Freeze(ctx context.Context, externalRef, reason string) (Account
 	if err != nil {
 		return Account{}, err
 	}
-	// audit row via authorisation_evidence with freeze pseudo-transfer
-	_, _ = tx.Exec(ctx, `
+	// Audit row via authorisation_evidence with freeze pseudo-transfer.
+	// Evidence writes are not best-effort (ADR 0007): a freeze that cannot be
+	// evidenced does not commit. Previously this error was discarded (D-22).
+	_, err = tx.Exec(ctx, `
 		INSERT INTO authorisation_evidence (transfer_id, method, policy_decision)
 		VALUES ($1, 'passkey', $2::jsonb)
 	`, "freeze:"+externalRef+":"+time.Now().UTC().Format(time.RFC3339Nano),
 		fmt.Sprintf(`{"action":"freeze","reason":%q}`, reason))
+	if err != nil {
+		return Account{}, fmt.Errorf("freeze evidence: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Account{}, err
 	}
@@ -125,6 +131,10 @@ type HoldRequest struct {
 
 // PlaceHold reserves funds on the sender (hold_minor++). Idempotent.
 func (s *Store) PlaceHold(ctx context.Context, req HoldRequest) (string, error) {
+	if err := req.validate(); err != nil {
+		return "", err
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -196,6 +206,12 @@ type TransferRequest struct {
 
 // CaptureTransfer releases hold and posts double-entry transfer + optional fee.
 func (s *Store) CaptureTransfer(ctx context.Context, req TransferRequest) (string, error) {
+	if err := req.validate(); err != nil {
+		return "", err
+	}
+	// Presence only. This is not authorisation: the reference is unverified and
+	// unbound to the transaction. Replacing it with a verified, single-use
+	// assertion is ADR 0002 / gate G2 (D-01).
 	if req.AuthorisationRef == "" {
 		return "", ErrUnauthorised
 	}
