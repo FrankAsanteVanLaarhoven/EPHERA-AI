@@ -143,6 +143,12 @@ The real path is WebAuthn:
 3. `POST :8093/v1/grants/passkey` — a verified assertion mints a grant with
    method `passkey`.
 
+In the consumer surface this is wired: "Register passkey" runs the registration
+ceremony, and "Authorise with passkey & send" signs the prepared transfer. The
+relying-party id and origins must match where the app is served —
+`IDENTITY_RP_ID` and `IDENTITY_RP_ORIGINS`. WebAuthn requires a secure context,
+so use `localhost` or https.
+
 ### The sandbox authenticator
 
 `POST :8093/v1/grants` mints a grant with **no authenticator challenge at all**.

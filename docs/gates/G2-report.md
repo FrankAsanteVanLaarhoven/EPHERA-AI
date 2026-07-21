@@ -4,7 +4,8 @@
 **G2-A** — the authorisation reference stops being a string and becomes a
 signed, transaction-bound, single-use grant that the ledger verifies itself.
 **G2-B** — grants are minted only after a verified WebAuthn passkey assertion
-whose challenge is the transaction's binding digest.
+whose challenge is the transaction's binding digest, and the consumer surface
+performs that ceremony in the browser.
 **Exit condition (programme, full G2):** no password-only administration;
 negative authorisation tests pass.
 **Verdict:** PASS WITH LIMITATIONS — G2-A and G2-B are complete server-side;
@@ -35,7 +36,12 @@ unreachable.
 | `services/identity-access/internal/store/` | New (G2-B). Credential and challenge persistence; public keys only |
 | `services/identity-access/internal/passkey/` | New (G2-B). WebAuthn registration and assertion ceremonies |
 | `services/identity-access/cmd/api/passkey_routes.go` | New (G2-B). Register, challenge and passkey-mint endpoints |
-| `services/identity-access/internal/passkey/*_test.go` | New (G2-B). A software authenticator and 5 ceremony tests |
+| `services/identity-access/internal/webauthntest/` | New (G2-B). A software authenticator: real P-256 keys, real attestation and assertion responses |
+| `services/identity-access/internal/passkey/passkey_test.go` | New (G2-B). 5 ceremony tests, 8 cases |
+| `services/identity-access/cmd/api/ceremony_test.go` | New (G2-B). 7 end-to-end tests over the real HTTP surface against Postgres |
+| `packages/passkeys/src/webauthn.ts` + test | New (G2-B). Browser encoding helpers, 7 unit tests |
+| `apps/consumer-pwa/src/lib/webauthn.ts` | New (G2-B). The `navigator.credentials` ceremony |
+| `apps/consumer-pwa/src/lib/api.ts`, `components/PwaShell.tsx` | Send authorises with a passkey; the result states which path authorised it |
 | `services/ledger/migrations/005_authorisation_grants.sql` | New. Grant consumption table; evidence records method and grant reference |
 | `services/ledger/internal/store/authorisation.go` | New. Grant verification and fail-closed key handling |
 | `services/ledger/internal/store/store.go` | Capture verifies and consumes a grant; evidence records the real method |
@@ -65,7 +71,9 @@ is what gets recorded (ADR 0009).
 | `go test ./...` in `services/authgrant` | ok — 9 tests including binding tamper cases |
 | `go test ./...` in `services/ledger` with a database | ok — 20 tests |
 | `go test ./...` / `go vet` in `services/payments` | ok |
-| `go test ./...` in `services/identity-access` | ok — 5 ceremony tests, 8 cases |
+| `go test ./...` in `services/identity-access` | ok — 12 tests (5 ceremony, 7 HTTP end-to-end) |
+| `npm run test -w @ephera/passkeys` | ok — 9 tests |
+| Browser decode against live `register/begin` output | challenge and user id decode to 32 bytes; rp id and user-verification requirement survive |
 | `./scripts/db-migrate.sh` | 1 applied, 4 already present; re-run a no-op |
 | `npm run typecheck` and `build` for consumer-pwa | ok |
 | `cargo test`, voice `pytest` | 11 and 4 passed |
@@ -134,11 +142,16 @@ Residual risks:
 - Freeze and airtime still take an unbound grant: the pre-check confirms a grant
   was supplied and parses, but neither flow binds to one. Freeze changes account
   state and deserves the same treatment.
-- **No client performs the ceremony yet.** Registration and assertion are
-  verified server-side and tested with a software authenticator, but the mobile
-  app and browser surface still call the sandbox mint endpoint. Until they are
-  wired, the sandbox authenticator is what the demo actually exercises. Native
-  passkeys additionally need an Expo development build.
+- **The browser ceremony has not been run in a real browser here.** The consumer
+  surface is wired, type-checked and built, its encoding layer is unit tested and
+  checked against live server output, and the server side is proven by HTTP tests
+  driven by a software authenticator. What has not happened in this environment
+  is a real `navigator.credentials` call against a real or virtual authenticator,
+  because that needs a browser. Treat the browser path as unverified until
+  someone completes a ceremony against a running stack.
+- **The mobile app still has no passkey.** It calls the sandbox mint endpoint.
+  Native passkeys need an Expo development build and a native module; the mock
+  now returns an unavailable module rather than silently substituting itself.
 - Relying-party identity defaults to `localhost` with development origins. Real
   values are a deployment decision and must be set before any device registers a
   credential it expects to keep working.
@@ -178,8 +191,9 @@ services.
 
 G2 as a whole is **not** met, for two reasons stated plainly:
 
-1. **No client performs the passkey ceremony.** The verification path is real
-   and tested, but the surfaces still use the sandbox authenticator. D-01 is not
+1. **No ceremony has been completed by a real device.** The browser path is
+   wired and the server path is proven, but nobody has yet signed a transfer with
+   an actual authenticator, and the mobile app has no passkey at all. D-01 is not
    closed until a real device signs a real transfer.
 2. **Administration is untouched.** The gate's exit condition includes no
    password-only administration. The operator console still has no server-side
@@ -187,9 +201,9 @@ G2 as a whole is **not** met, for two reasons stated plainly:
 
 Remaining G2 work, in order:
 
-- **G2-B(ii) — client ceremonies.** Browser WebAuthn in the consumer surface,
-  native passkeys in an Expo development build. Then remove the mock module and
-  disable the sandbox authenticator by default. D-01 closes here.
+- **G2-B(iii) — prove it on a device.** Complete a browser ceremony against the
+  running stack, then native passkeys in an Expo development build. Then remove
+  the sandbox authenticator entirely. D-01 closes here.
 - **G2-C — operator identity.** `platform-control-bff` with SSO, server-side
   role checks, maker-checker and just-in-time elevation, closing D-06, D-12,
   D-13 and the rest of D-07.

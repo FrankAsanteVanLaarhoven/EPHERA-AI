@@ -146,6 +146,7 @@ jobs:
           --health-retries 20
     env:
       IDENTITY_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5434/ephera_identity?sslmode=disable
+      IDENTITY_TEST_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5434/ephera_identity?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

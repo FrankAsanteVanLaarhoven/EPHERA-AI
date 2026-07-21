@@ -1,4 +1,12 @@
-package passkey
+// Package webauthntest provides a software WebAuthn authenticator.
+//
+// It exists so the ceremonies can be exercised end to end without a browser:
+// it holds a P-256 key and produces genuine attestation and assertion
+// responses, signing exactly what a hardware authenticator signs --
+// authenticatorData || SHA-256(clientDataJSON).
+//
+// Test support only. Nothing in the service imports it.
+package webauthntest
 
 import (
 	"crypto/ecdsa"
@@ -8,9 +16,6 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
-	"math/big"
-	"testing"
 )
 
 // A software authenticator, used to exercise the real WebAuthn verification
@@ -21,7 +26,7 @@ import (
 // Nothing here is used outside tests. It exists so the ceremonies can be
 // verified end to end without a browser.
 
-type softAuthenticator struct {
+type Authenticator struct {
 	key       *ecdsa.PrivateKey
 	credID    []byte
 	rpID      string
@@ -29,24 +34,23 @@ type softAuthenticator struct {
 	signCount uint32
 }
 
-func newAuthenticator(t *testing.T, rpID, origin string) *softAuthenticator {
-	t.Helper()
+func New(rpID, origin string) (*Authenticator, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatalf("keygen: %v", err)
+		return nil, err
 	}
 	credID := make([]byte, 32)
 	if _, err := rand.Read(credID); err != nil {
-		t.Fatalf("cred id: %v", err)
+		return nil, err
 	}
-	return &softAuthenticator{key: key, credID: credID, rpID: rpID, origin: origin}
+	return &Authenticator{key: key, credID: credID, rpID: rpID, origin: origin}, nil
 }
 
 // coseKey encodes the public key as a COSE_Key EC2 map, which is what the
 // authenticator hands the relying party and what verification later uses.
 //
 //	{1: 2 (EC2), 3: -7 (ES256), -1: 1 (P-256), -2: x, -3: y}
-func (a *softAuthenticator) coseKey() []byte {
+func (a *Authenticator) coseKey() []byte {
 	x := make([]byte, 32)
 	y := make([]byte, 32)
 	a.key.PublicKey.X.FillBytes(x)
@@ -69,7 +73,7 @@ const (
 	flagAttested     = 0x40
 )
 
-func (a *softAuthenticator) authData(includeAttested bool) []byte {
+func (a *Authenticator) authData(includeAttested bool) []byte {
 	h := sha256.Sum256([]byte(a.rpID))
 	flags := byte(flagUserPresent | flagUserVerified)
 	if includeAttested {
@@ -93,7 +97,7 @@ func (a *softAuthenticator) authData(includeAttested bool) []byte {
 	return data
 }
 
-func (a *softAuthenticator) clientData(ceremonyType, challengeB64 string) []byte {
+func (a *Authenticator) clientData(ceremonyType, challengeB64 string) []byte {
 	cd := map[string]any{
 		"type":        ceremonyType,
 		"challenge":   challengeB64,
@@ -124,7 +128,7 @@ func cborText(s string) []byte {
 
 // registrationResponse builds a credential creation response with "none"
 // attestation, exactly as a platform authenticator would.
-func (a *softAuthenticator) registrationResponse(challengeB64 string) []byte {
+func (a *Authenticator) RegistrationResponse(challengeB64 string) []byte {
 	clientData := a.clientData("webauthn.create", challengeB64)
 
 	att := []byte{0xa3} // map, 3 pairs
@@ -150,8 +154,7 @@ func (a *softAuthenticator) registrationResponse(challengeB64 string) []byte {
 
 // assertionResponse signs authenticatorData || SHA-256(clientDataJSON), which
 // is the WebAuthn signature base.
-func (a *softAuthenticator) assertionResponse(t *testing.T, challengeB64 string, userHandle []byte) []byte {
-	t.Helper()
+func (a *Authenticator) AssertionResponse(challengeB64 string, userHandle []byte) ([]byte, error) {
 	a.signCount++
 	clientData := a.clientData("webauthn.get", challengeB64)
 	authData := a.authData(false)
@@ -159,7 +162,7 @@ func (a *softAuthenticator) assertionResponse(t *testing.T, challengeB64 string,
 	digest := sha256.Sum256(append(append([]byte{}, authData...), hash(clientData)...))
 	sig, err := ecdsa.SignASN1(rand.Reader, a.key, digest[:])
 	if err != nil {
-		t.Fatalf("sign: %v", err)
+		return nil, err
 	}
 
 	body := map[string]any{
@@ -174,16 +177,28 @@ func (a *softAuthenticator) assertionResponse(t *testing.T, challengeB64 string,
 		},
 	}
 	b, _ := json.Marshal(body)
-	return b
+	return b, nil
 }
 
-// corruptedAssertionResponse produces a well-formed assertion whose signature
-// was made by a different key -- a forgery attempt.
-func (a *softAuthenticator) forgedAssertionResponse(t *testing.T, challengeB64 string, userHandle []byte) []byte {
-	t.Helper()
-	rogue := newAuthenticator(t, a.rpID, a.origin)
-	rogue.credID = a.credID // claim the victim's credential id
-	return rogue.assertionResponse(t, challengeB64, userHandle)
+// ForgedAssertionResponse produces a well-formed assertion whose signature was
+// made by a different key while claiming the victim's credential id.
+func (a *Authenticator) ForgedAssertionResponse(challengeB64 string, userHandle []byte) ([]byte, error) {
+	rogue, err := New(a.rpID, a.origin)
+	if err != nil {
+		return nil, err
+	}
+	rogue.credID = a.credID
+	return rogue.AssertionResponse(challengeB64, userHandle)
+}
+
+// Key exposes the signing key so a test can build a second authenticator that
+// shares it (for example, to simulate a different origin).
+func (a *Authenticator) Key() *ecdsa.PrivateKey { return a.key }
+
+// SetKeyAndCredential makes this authenticator impersonate another one.
+func (a *Authenticator) SetKeyAndCredential(k *ecdsa.PrivateKey, credID []byte) {
+	a.key = k
+	a.credID = credID
 }
 
 func hash(b []byte) []byte {
@@ -191,5 +206,6 @@ func hash(b []byte) []byte {
 	return h[:]
 }
 
-var _ = fmt.Sprintf
-var _ = big.NewInt
+
+// CredentialID returns the credential id this authenticator presents.
+func (a *Authenticator) CredentialID() []byte { return a.credID }

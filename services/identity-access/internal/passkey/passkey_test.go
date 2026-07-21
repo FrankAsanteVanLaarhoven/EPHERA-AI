@@ -7,8 +7,27 @@ import (
 	"testing"
 
 	"github.com/ephera/authgrant"
+	"github.com/ephera/identity-access/internal/webauthntest"
 	"github.com/go-webauthn/webauthn/webauthn"
 )
+
+func newAuthenticator(t *testing.T, rpID, origin string) *webauthntest.Authenticator {
+	t.Helper()
+	a, err := webauthntest.New(rpID, origin)
+	if err != nil {
+		t.Fatalf("authenticator: %v", err)
+	}
+	return a
+}
+
+func assertion(t *testing.T, a *webauthntest.Authenticator, challenge string, handle []byte) []byte {
+	t.Helper()
+	b, err := a.AssertionResponse(challenge, handle)
+	if err != nil {
+		t.Fatalf("assertion: %v", err)
+	}
+	return b
+}
 
 const (
 	testRPID   = "ephera.test"
@@ -46,13 +65,13 @@ func binding() authgrant.Binding {
 }
 
 // register runs a full registration ceremony and returns the stored credential.
-func register(t *testing.T, s *Service, u *testUser, a *softAuthenticator) *webauthn.Credential {
+func register(t *testing.T, s *Service, u *testUser, a *webauthntest.Authenticator) *webauthn.Credential {
 	t.Helper()
 	opts, sess, err := s.BeginRegistration(u)
 	if err != nil {
 		t.Fatalf("begin registration: %v", err)
 	}
-	body := a.registrationResponse(opts.Response.Challenge.String())
+	body := a.RegistrationResponse(opts.Response.Challenge.String())
 	cred, err := s.FinishRegistration(u, *sess, bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("finish registration: %v", err)
@@ -80,7 +99,7 @@ func TestRegistrationAndAuthorisation(t *testing.T) {
 		t.Fatal("challenge is not the transaction binding digest")
 	}
 
-	body := a.assertionResponse(t, opts.Response.Challenge.String(), u.handle)
+	body := assertion(t, a, opts.Response.Challenge.String(), u.handle)
 	if _, err := s.FinishAuthorisation(u, *sess, b, bytes.NewReader(body)); err != nil {
 		t.Fatalf("finish authorisation: %v", err)
 	}
@@ -99,7 +118,7 @@ func TestAssertionCannotBeRepointed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	body := a.assertionResponse(t, opts.Response.Challenge.String(), u.handle)
+	body := assertion(t, a, opts.Response.Challenge.String(), u.handle)
 
 	tampered := map[string]func(*authgrant.Binding){
 		"amount inflated":   func(b *authgrant.Binding) { b.AmountMinor = 900_000 },
@@ -132,7 +151,10 @@ func TestForgedAssertionRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	body := a.forgedAssertionResponse(t, opts.Response.Challenge.String(), u.handle)
+	body, err := a.ForgedAssertionResponse(opts.Response.Challenge.String(), u.handle)
+	if err != nil {
+		t.Fatalf("forge: %v", err)
+	}
 	if _, err := s.FinishAuthorisation(u, *sess, b, bytes.NewReader(body)); err == nil {
 		t.Fatal("assertion signed by an unknown key was accepted")
 	}
@@ -153,9 +175,8 @@ func TestWrongOriginRejected(t *testing.T) {
 	}
 
 	evil := newAuthenticator(t, testRPID, "https://phishing.example")
-	evil.key = a.key
-	evil.credID = a.credID
-	body := evil.assertionResponse(t, opts.Response.Challenge.String(), u.handle)
+	evil.SetKeyAndCredential(a.Key(), a.CredentialID())
+	body := assertion(t, evil, opts.Response.Challenge.String(), u.handle)
 
 	if _, err := s.FinishAuthorisation(u, *sess, b, bytes.NewReader(body)); err == nil {
 		t.Fatal("assertion from a different origin was accepted")

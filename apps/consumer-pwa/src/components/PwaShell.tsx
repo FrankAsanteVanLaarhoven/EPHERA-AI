@@ -9,6 +9,9 @@ import {
   PAYMENTS,
   type Balance,
 } from "../lib/api";
+import { passkeysSupported, registerPasskey } from "../lib/webauthn";
+
+const DEMO_SUBJECT = "user:demo-self:GHS";
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -62,6 +65,14 @@ export function PwaShell() {
     setDeferred(null);
   }
 
+  async function onRegisterPasskey() {
+    setBusy(true);
+    setMsg(null);
+    const r = await registerPasskey(DEMO_SUBJECT, "EPHERA Demo");
+    setMsg(r.message);
+    setBusy(false);
+  }
+
   async function onSend(full = false) {
     setBusy(true);
     setMsg(null);
@@ -78,6 +89,12 @@ export function PwaShell() {
       return;
     }
     const r = await sendTransfer({ amountMinor: minor, recipientName: recipient });
+    if (r.needsRegistration) {
+      // Offer to register a passkey, then the user taps send again.
+      setMsg(`${r.message} Tap "Register passkey" below, then send.`);
+      setBusy(false);
+      return;
+    }
     setMsg(r.message);
     if (r.ok) await refresh();
     setBusy(false);
@@ -201,9 +218,28 @@ export function PwaShell() {
               disabled={busy}
               onClick={() => void onSend(true)}
             >
-              {busy ? "Working…" : "Authorise & send (sandbox)"}
+              {busy
+                ? "Working…"
+                : passkeysSupported()
+                  ? "Authorise with passkey & send"
+                  : "Authorise & send (sandbox)"}
             </button>
+            {passkeysSupported() ? (
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={busy}
+                onClick={() => void onRegisterPasskey()}
+              >
+                Register passkey
+              </button>
+            ) : null}
           </div>
+          <p style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.5, marginTop: 10 }}>
+            {passkeysSupported()
+              ? "Your passkey signs the exact transfer — recipient, amount and fee. A signature for one payment cannot authorise another."
+              : "This browser has no passkey support, so the sandbox authenticator is used. It does not prove a person approved the payment."}
+          </p>
           {msg ? (
             <div className="glass" style={{ padding: 14, marginTop: 14, fontSize: 13, lineHeight: 1.5 }}>
               {msg}

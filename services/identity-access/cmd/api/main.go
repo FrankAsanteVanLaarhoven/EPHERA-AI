@@ -86,6 +86,16 @@ func main() {
 
 	s := &server{priv: priv, pub: pub, sandboxMint: sandboxMint, store: st, passkeys: pk}
 
+	log.Printf("EPHERA identity-access on %s (env %s)", httpAddr, environment)
+	log.Printf("authorisation public key: %s", hex.EncodeToString(pub))
+	if err := http.ListenAndServe(httpAddr, s.routes()); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// routes is separate from main so tests can drive the real HTTP surface rather
+// than calling handlers directly.
+func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /v1/keys", s.keys)
@@ -94,12 +104,7 @@ func main() {
 	mux.HandleFunc("POST /v1/grants/challenge", s.grantChallenge)
 	mux.HandleFunc("POST /v1/grants/passkey", s.mintWithPasskey)
 	mux.HandleFunc("POST /v1/grants", s.mintGrant)
-
-	log.Printf("EPHERA identity-access on %s (env %s)", httpAddr, environment)
-	log.Printf("authorisation public key: %s", hex.EncodeToString(pub))
-	if err := http.ListenAndServe(httpAddr, withCORS(mux)); err != nil {
-		log.Fatal(err)
-	}
+	return withCORS(mux)
 }
 
 // loadOrCreateKey derives the signing key from a seed when one is supplied, so

@@ -1,3 +1,5 @@
+import { authoriseWithPasskey, passkeysSupported } from "./webauthn";
+
 const PAYMENTS =
   process.env.NEXT_PUBLIC_PAYMENTS_URL || "http://localhost:8090";
 const IDENTITY =
@@ -69,6 +71,17 @@ export async function prepareTransfer(body: {
   }
 }
 
+export type SendMode = "passkey" | "sandbox";
+
+export interface SendResult {
+  ok: boolean;
+  message: string;
+  /** How this transfer was authorised, or "none" if it never got that far. */
+  authorisedBy: SendMode | "none";
+  /** True when the caller should offer to register a passkey and retry. */
+  needsRegistration?: boolean;
+}
+
 /**
  * Send money.
  *
@@ -82,14 +95,19 @@ export async function prepareTransfer(body: {
  * can no longer mint one: only identity-access holds the signing key, and the
  * ledger verifies the signature and the binding.
  *
- * The remaining gap is that identity-access does not yet verify a passkey, so
- * the grant it returns is labelled `sandbox_authenticator` end to end. This is
- * not yet proof that a human authorised anything -- see G2-B.
+ * The grant is obtained by signing the transfer with a registered passkey. The
+ * sandbox authenticator is used only when the browser has no passkey support at
+ * all, and it is refused by identity-access for any subject that has registered
+ * one -- a weaker method is never reachable for a user who has a stronger one.
+ * The result says which path was used so the caller never claims more than
+ * happened.
  */
 export async function sendTransfer(body: {
   amountMinor: number;
   recipientName: string;
-}): Promise<{ ok: boolean; message: string }> {
+  /** Set when authorisation must use a passkey; sandbox fallback is refused. */
+  requirePasskey?: boolean;
+}): Promise<SendResult> {
   try {
     const prepRes = await fetch(`${PAYMENTS}/v1/transfers/prepare`, {
       method: "POST",
@@ -104,28 +122,56 @@ export async function sendTransfer(body: {
     });
     if (!prepRes.ok) {
       const err = await prepRes.json().catch(() => ({}));
-      return { ok: false, message: err.message ?? `Prepare failed: HTTP ${prepRes.status}` };
+      return { ok: false, authorisedBy: "none", message: err.message ?? `Prepare failed: HTTP ${prepRes.status}` };
     }
     const prepared = await prepRes.json();
 
-    const grantRes = await fetch(`${IDENTITY}/v1/grants`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        subject: prepared.fromExternalRef,
-        fromExternalRef: prepared.fromExternalRef,
-        toExternalRef: prepared.toExternalRef,
-        amountMinor: prepared.amountMinor,
-        feeMinor: prepared.feeMinor,
-        currency: prepared.currency,
-        transferId: prepared.transferId,
-      }),
-    });
-    if (!grantRes.ok) {
-      const err = await grantRes.json().catch(() => ({}));
-      return { ok: false, message: err.message ?? `Authorisation failed: HTTP ${grantRes.status}` };
+    let grant: string | null = null;
+    let authorisedBy: SendMode = "passkey";
+
+    if (passkeysSupported()) {
+      const res = await authoriseWithPasskey(prepared);
+      if (res.reason === "no_passkey") {
+        return {
+          ok: false,
+          authorisedBy: "none",
+          needsRegistration: true,
+          message: "Register a passkey on this device to authorise the payment.",
+        };
+      }
+      if (!res.grant) {
+        return { ok: false, authorisedBy: "none", message: res.message ?? "Authorisation failed." };
+      }
+      grant = res.grant;
+    } else if (body.requirePasskey) {
+      return {
+        ok: false,
+        authorisedBy: "none",
+        message: "This browser cannot use passkeys, and this payment requires one.",
+      };
+    } else {
+      // No passkey support at all: fall back to the sandbox authenticator. It is
+      // refused server-side if this subject has registered a passkey.
+      const grantRes = await fetch(`${IDENTITY}/v1/grants`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: prepared.fromExternalRef,
+          fromExternalRef: prepared.fromExternalRef,
+          toExternalRef: prepared.toExternalRef,
+          amountMinor: prepared.amountMinor,
+          feeMinor: prepared.feeMinor,
+          currency: prepared.currency,
+          transferId: prepared.transferId,
+        }),
+      });
+      if (!grantRes.ok) {
+        const err = await grantRes.json().catch(() => ({}));
+        return { ok: false, authorisedBy: "none", message: err.message ?? `Authorisation failed: HTTP ${grantRes.status}` };
+      }
+      grant = (await grantRes.json()).grant;
+      authorisedBy = "sandbox";
     }
-    const { grant } = await grantRes.json();
 
     const res = await fetch(`${PAYMENTS}/v1/transfers`, {
       method: "POST",
@@ -146,16 +192,20 @@ export async function sendTransfer(body: {
     if (!res.ok && data.status !== "settled") {
       return {
         ok: false,
+        authorisedBy: "none",
         message: data.message ?? data.error ?? `HTTP ${res.status}`,
       };
     }
+    const how = authorisedBy === "passkey" ? "passkey" : "sandbox authenticator";
     return {
       ok: true,
-      message: `Settled · ${data.transferId ?? "ok"} · ${data.status ?? "settled"}`,
+      authorisedBy,
+      message: `Settled via ${how} · ${data.transferId ?? "ok"} · ${data.status ?? "settled"}`,
     };
   } catch (e) {
     return {
       ok: false,
+      authorisedBy: "none",
       message: e instanceof Error ? e.message : "Network error",
     };
   }

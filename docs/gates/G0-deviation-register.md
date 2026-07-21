@@ -33,7 +33,7 @@ Reduced at G2-A and G2-B — see [`G2-report.md`](G2-report.md).
 
 | ID | Sev | State |
 | --- | --- | --- |
-| D-01 | S1 | **Reduced, not closed.** The authorisation reference is now a signed, transaction-bound, single-use grant that the ledger verifies itself and consumes; forgery, repointing and replay are closed. WebAuthn registration and assertion verification exist and are tested, with the assertion challenge set to the transfer's binding digest. What remains is that no client performs the ceremony yet, so the demo still uses the sandbox authenticator. Closes when a real device signs a real transfer (G2-B(ii)) |
+| D-01 | S1 | **Reduced, not closed.** The authorisation reference is now a signed, transaction-bound, single-use grant that the ledger verifies itself and consumes; forgery, repointing and replay are closed. WebAuthn registration and assertion verification exist and are tested, with the assertion challenge set to the transfer's binding digest. The consumer surface now performs the browser ceremony. What remains is that no real device has completed one — the browser path is unverified outside typecheck and build here, and the mobile app has no passkey at all. Closes when a real device signs a real transfer |
 | D-07 | S1 | The console's hardcoded literal no longer authorises anything at the ledger. The console still has no authentication of its own (G2-C) |
 | D-31 | S1 | The browser surface can no longer mint its own reference; it obtains a grant. Subject to the same G2-B caveat |
 | D-32 | S1 | The mock no longer produces anything the ledger accepts. It remains as the on-device confirmation step until the client ceremonies land |
