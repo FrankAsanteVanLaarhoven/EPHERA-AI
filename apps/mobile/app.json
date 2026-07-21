@@ -17,12 +17,9 @@
         "backgroundColor": "#0B0F14"
       }
     },
-    "plugins": ["expo-router"],
-    "experiments": {
-      "typedRoutes": true
-    },
+    "plugins": ["expo-asset", "expo-font"],
     "extra": {
-      "epheraNote": "Use development builds, not Expo Go, for passkeys/voice/native modules"
+      "epheraNote": "Sandbox Expo Go demo. Development builds required for native passkeys."
     }
   }
 }

@@ -4,9 +4,13 @@
   "version": "0.1.0",
   "description": "EPHERA Money — voice-native mobile money and financial access platform",
   "workspaces": [
-    "apps/*",
+    "apps/merchant-web",
+    "apps/consumer-pwa",
     "packages/*"
   ],
+  "overrides": {
+    "react-native": "0.76.9"
+  },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present && npm run test:ledger",
