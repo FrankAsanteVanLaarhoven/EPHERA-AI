@@ -16,6 +16,7 @@
 | Voice-intent API | **8091** |
 | Ledger API | **8092** |
 | identity-access | **8093** |
+| platform-control-bff | **8094** |
 | Merchant web (dev) | 3005 |
 | Consumer PWA (dev) | 3006 |
 | Super Admin console (dev) | **3007** |
@@ -70,6 +71,7 @@ MinIO console: http://localhost:9001 (ephera / ephera_dev_only)
 # terminals:
 npm run db:migrate
 npm run db:migrate:identity
+npm run db:migrate:control
 npm run dev:ledger            # :8092 authoritative balances
 npm run dev:payments-worker
 npm run dev:payments-api      # :8090

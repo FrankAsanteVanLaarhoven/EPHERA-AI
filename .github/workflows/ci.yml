@@ -166,6 +166,45 @@ jobs:
         working-directory: services/identity-access
         run: go test ./...
 
+  control-plane:
+    name: platform-control-bff (operator authorisation)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ephera
+          POSTGRES_PASSWORD: ephera_dev_only
+          POSTGRES_DB: ephera_operations
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd "pg_isready -U ephera -d ephera_operations"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CONTROL_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5435/ephera_operations?sslmode=disable
+      CONTROL_TEST_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5435/ephera_operations?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Apply migrations
+        run: ./scripts/db-migrate.sh platform-control-bff
+      - name: Migrations are idempotent
+        run: ./scripts/db-migrate.sh platform-control-bff
+      - name: Build
+        working-directory: services/platform-control-bff
+        run: go build ./...
+      - name: Vet
+        working-directory: services/platform-control-bff
+        run: go vet ./...
+      - name: Negative authorisation tests
+        working-directory: services/platform-control-bff
+        run: go test ./...
+
   payments:
     name: payments
     runs-on: ubuntu-latest

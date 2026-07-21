@@ -40,6 +40,18 @@ Reduced at G2-A and G2-B — see [`G2-report.md`](G2-report.md).
 | D-34 | S1 | The idempotency key is derived from the intent and amount rather than the clock, so a retry is the same transfer. A repeat also now fails on grant single use |
 | D-19 | S2 | One fee function serves quote, prepare, grant binding and capture |
 
+Addressed at G2-C — see [`G2C-report.md`](G2C-report.md). The control plane
+exists and is tested; **the console has not been migrated onto it**, so the
+unauthenticated surface is still live and these stay open.
+
+| ID | Sev | State |
+| --- | --- | --- |
+| D-06 | S1 | `platform-control-bff` requires an authenticated operator session on every route and has no password anywhere. Open until the console is rewired and its 19 routes deleted |
+| D-12 | S1 | Roles come from the signed session and are re-read from the database; a validly signed token claiming a role it does not hold is refused. Open until the console uses it |
+| D-13 | S2 | Maker-checker enforced in code and by a database constraint: the proposer cannot approve, at any severity. Reasons are mandatory |
+| D-14 | S2 | Audit is append-only and hash-chained, with `UPDATE`/`DELETE` refused by trigger and a chain verifier. Actor comes from the session. Open until the console writes to it |
+| D-15 | S2 | Operator state, approvals and audit are in Postgres. Open until the console stops using its in-memory store |
+
 Partially addressed, decision open:
 
 | ID | Sev | State |
