@@ -59,8 +59,15 @@ jobs:
           node-version: "20"
           cache: npm
       - run: npm install
+      # Explicit dependency order. `npm run build --workspaces` picks its own
+      # order, which built payment-sdk before validation had emitted its types
+      # and built the applications before any package was ready.
       - name: Build workspace packages first
-        run: npm run build --workspaces --if-present
+        run: |
+          for p in design-tokens intent-schema validation payment-sdk \
+                   passkeys offline-queue voice-sdk api-client capability-schema; do
+            npm run build -w "@ephera/$p"
+          done
       - name: Type-check applications
         run: |
           for a in merchant-web consumer-pwa admin-console provider-portal; do
