@@ -7,12 +7,15 @@ import {
   View,
   type ViewStyle,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useMemo } from "react";
 
-const { width: W, height: H } = Dimensions.get("window");
+const { width: WIN_W, height: WIN_H } = Dimensions.get("window");
+
+/** Design panel intrinsic aspect (after crop). Slightly taller phone UI. */
+const PANEL_ASPECT = 355 / 560; // w/h ≈ 0.63
 
 export type Hotspot = {
-  /** fractions of screen 0–1 */
+  /** fractions of the *image content* rect (0–1), not the full window */
   x: number;
   y: number;
   w: number;
@@ -20,29 +23,64 @@ export type Hotspot = {
   onPress: () => void;
 };
 
+function fitContain(containerW: number, containerH: number, aspect: number) {
+  // aspect = width/height of image
+  const containerAspect = containerW / containerH;
+  let width: number;
+  let height: number;
+  if (containerAspect > aspect) {
+    // container wider → letterbox sides
+    height = containerH;
+    width = height * aspect;
+  } else {
+    // container taller → letterbox top/bottom
+    width = containerW;
+    height = width / aspect;
+  }
+  const left = (containerW - width) / 2;
+  const top = (containerH - height) / 2;
+  return { width, height, left, top };
+}
+
 /**
- * Full-bleed design panel from product benchmark mockups.
- * Invisible hotspots drive navigation / actions.
+ * Full design panel from product benchmark mockups.
+ * Uses contain (not cover) so nothing is cropped; hotspots map to the image rect.
  */
 export default function DesignScreen({
   source,
   hotspots = [],
+  aspect = PANEL_ASPECT,
 }: {
   source: ImageSourcePropType;
   hotspots?: Hotspot[];
+  /** width/height of the design asset */
+  aspect?: number;
 }) {
-  const insets = useSafeAreaInsets();
-  // Use full window; mockups already include status chrome
+  const layout = useMemo(
+    () => fitContain(WIN_W, WIN_H, aspect),
+    [aspect],
+  );
+
   return (
     <View style={styles.root}>
-      <Image source={source} style={styles.image} resizeMode="cover" />
+      <Image
+        source={source}
+        style={{
+          position: "absolute",
+          left: layout.left,
+          top: layout.top,
+          width: layout.width,
+          height: layout.height,
+        }}
+        resizeMode="contain"
+      />
       {hotspots.map((hs, i) => {
         const style: ViewStyle = {
           position: "absolute",
-          left: hs.x * W,
-          top: hs.y * H,
-          width: hs.w * W,
-          height: hs.h * H,
+          left: layout.left + hs.x * layout.width,
+          top: layout.top + hs.y * layout.height,
+          width: hs.w * layout.width,
+          height: hs.h * layout.height,
         };
         return (
           <Pressable
@@ -53,8 +91,6 @@ export default function DesignScreen({
           />
         );
       })}
-      {/* keep safe area tappable for top status if needed */}
-      <View pointerEvents="none" style={{ height: insets.top }} />
     </View>
   );
 }
@@ -63,10 +99,5 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: "#02060F",
-  },
-  image: {
-    ...StyleSheet.absoluteFillObject,
-    width: W,
-    height: H,
   },
 });

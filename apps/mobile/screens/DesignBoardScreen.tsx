@@ -11,25 +11,21 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Screen } from "../App";
 
 const BOARD = require("../assets/design-board.jpg");
-const { width: WIN_W, height: WIN_H } = Dimensions.get("window");
+const { width: WIN_W } = Dimensions.get("window");
 
 /** Full product design board (2×3) — one window to see every screen. */
 const PANELS: {
   id: Screen;
   label: string;
-  /** fractions of the board image */
   x: number;
   y: number;
   w: number;
   h: number;
 }[] = [
-  // row 0
   { id: "splash", label: "Splash", x: 0.02, y: 0.015, w: 0.47, h: 0.32 },
   { id: "welcome", label: "Welcome", x: 0.51, y: 0.015, w: 0.47, h: 0.32 },
-  // row 1
   { id: "listening", label: "Listening", x: 0.02, y: 0.34, w: 0.47, h: 0.32 },
   { id: "home", label: "Home", x: 0.51, y: 0.34, w: 0.47, h: 0.32 },
-  // row 2
   { id: "services", label: "Services", x: 0.02, y: 0.665, w: 0.47, h: 0.32 },
   { id: "voiceMode", label: "Voice Mode", x: 0.51, y: 0.665, w: 0.47, h: 0.32 },
 ];
@@ -40,14 +36,13 @@ export default function DesignBoardScreen({
   go: (screen: Screen, params?: Record<string, string>) => void;
 }) {
   const insets = useSafeAreaInsets();
-  // Board aspect 853×1844 → height from full width
   const boardW = WIN_W;
   const boardH = boardW * (1844 / 853);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <View>
+        <View style={{ flex: 1, paddingRight: 12 }}>
           <Text style={styles.kicker}>EPHERA · PRODUCT DASHBOARD</Text>
           <Text style={styles.title}>All screens · one view</Text>
         </View>
@@ -56,22 +51,20 @@ export default function DesignBoardScreen({
         </Pressable>
       </View>
       <Text style={styles.hint}>
-        Pinch/scroll the board. Tap any phone to open that screen.
+        Scroll the board. Tap any phone to open that full screen (no crop).
       </Text>
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={{
           width: boardW,
-          height: boardH + 24,
+          minHeight: boardH + 24,
           paddingBottom: insets.bottom + 16,
         }}
         maximumZoomScale={3}
         minimumZoomScale={1}
         showsVerticalScrollIndicator
-        showsHorizontalScrollIndicator
         bouncesZoom
-        centerContent={boardH < WIN_H}
       >
         <View style={{ width: boardW, height: boardH }}>
           <Image
@@ -103,28 +96,29 @@ export default function DesignBoardScreen({
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        <Pressable style={styles.chip} onPress={() => go("home")}>
-          <Text style={styles.chipText}>Wallet</Text>
-        </Pressable>
-        <Pressable style={styles.chip} onPress={() => go("listening")}>
-          <Text style={styles.chipText}>Voice</Text>
-        </Pressable>
-        <Pressable style={styles.chip} onPress={() => go("send")}>
-          <Text style={styles.chipText}>Send</Text>
-        </Pressable>
-        <Pressable style={styles.chip} onPress={() => go("services")}>
-          <Text style={styles.chipText}>Services</Text>
-        </Pressable>
+        {(
+          [
+            ["Wallet", "home"],
+            ["Voice", "listening"],
+            ["Send", "send"],
+            ["Services", "services"],
+          ] as const
+        ).map(([label, screen]) => (
+          <Pressable
+            key={label}
+            style={styles.chip}
+            onPress={() => go(screen)}
+          >
+            <Text style={styles.chipText}>{label}</Text>
+          </Pressable>
+        ))}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: "#02060F",
-  },
+  root: { flex: 1, backgroundColor: "#02060F" },
   header: {
     paddingHorizontal: 16,
     paddingTop: 8,
