@@ -1,0 +1,131 @@
+# EPHERA local infrastructure — sandbox only, no live funds
+name: ephera
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ephera-postgres
+    environment:
+      POSTGRES_USER: ephera
+      POSTGRES_PASSWORD: ephera_dev_only
+      POSTGRES_DB: ephera_ledger
+    ports:
+      - "5433:5432"
+    volumes:
+      - ephera_pg:/var/lib/postgresql/data
+      - ./local/init-databases.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ephera -d ephera_ledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ephera-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ephera_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: ephera-nats
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: ephera-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ephera
+      MINIO_ROOT_PASSWORD: ephera_dev_only
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ephera_minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: ephera-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ephera ephera_dev_only &&
+      mc mb -p local/ephera-evidence || true &&
+      mc anonymous set none local/ephera-evidence || true
+      "
+    restart: "no"
+
+  # Temporal dependencies + server (auto-setup image creates schema)
+  temporal-postgresql:
+    image: postgres:16-alpine
+    container_name: ephera-temporal-pg
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - ephera_temporal_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    container_name: ephera-temporal
+    depends_on:
+      temporal-postgresql:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      POSTGRES_SEEDS: temporal-postgresql
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    ports:
+      - "7233:7233"
+    volumes:
+      - ./local/temporal-dynamicconfig:/etc/temporal/config/dynamicconfig
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    container_name: ephera-temporal-ui
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8088:8080"
+
+volumes:
+  ephera_pg:
+  ephera_redis:
+  ephera_minio:
+  ephera_temporal_pg:

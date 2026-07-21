@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  ledger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Ledger tests
+        working-directory: native/financial-core
+        run: cargo test
+
+  js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm install
+      - run: npm run build -w @ephera/intent-schema
+      - run: npm run build -w @ephera/validation
+      - run: npm run build -w @ephera/design-tokens
+      - run: npm run build -w @ephera/payment-sdk
+      - run: npm run build -w @ephera/passkeys
+      - run: npm run build -w @ephera/offline-queue
+      - run: npm run build -w @ephera/voice-sdk
+      - run: npm run build -w @ephera/api-client
+      - run: npm run test -w @ephera/validation
+      - run: npm run test -w @ephera/passkeys
+      - run: npm run test -w @ephera/offline-queue
+
+  payments-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Go tests
+        working-directory: services/payments
+        run: go test ./...
+
+  voice-intent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compiler unit checks
+        working-directory: services/voice-intent
+        run: |
+          python3 -c "
+          from intent_compiler import compile_text, needs_clarification
+          i = compile_text('Send 50 cedis to Ama')
+          assert i['name']=='send_money' and i['amount']['amountMinor']==5000
+          assert not needs_clarification(i)
+          assert compile_text('Freeze my wallet. Phone stolen')['name']=='freeze_wallet'
+          print('ok')
+          "

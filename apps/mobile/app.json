@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "EPHERA Money",
+    "slug": "ephera-money",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "ephera",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "money.ephera.app"
+    },
+    "android": {
+      "package": "money.ephera.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0F14"
+      }
+    },
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "epheraNote": "Use development builds, not Expo Go, for passkeys/voice/native modules"
+    }
+  }
+}

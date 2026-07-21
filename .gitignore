@@ -1,0 +1,65 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+**/.venv/
+**/venv/
+**/__pycache__/
+*.pyc
+
+# Builds
+dist/
+build/
+.next/
+out/
+.expo/
+.expo-shared/
+web-build/
+*.tsbuildinfo
+
+# Native
+**/ios/Pods/
+**/ios/build/
+**/android/.gradle/
+**/android/app/build/
+**/android/build/
+*.jks
+*.keystore
+
+# Rust
+target/
+**/*.rs.bk
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# Logs & coverage
+logs/
+*.log
+coverage/
+.nyc_output/
+
+# Docker volumes (if ever mounted into repo)
+.docker-data/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# Test artifacts
+playwright-report/
+test-results/
