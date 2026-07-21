@@ -18,6 +18,7 @@
 | Merchant web (dev) | 3005 |
 | Consumer PWA (dev) | 3006 |
 | Super Admin console (dev) | **3007** |
+| Provider Portal (dev) | **3008** |
 
 ## Start infrastructure
 

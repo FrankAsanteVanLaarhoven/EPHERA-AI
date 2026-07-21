@@ -21,6 +21,7 @@ Remote control plane for the entire EPHERA Money platform:
 | **Mandates** | Direct debit, standing orders, recurring, subscription billing |
 | **Communications** | Push, SMS, WhatsApp, voice/video call records (future telephony) |
 | **AI models** | Enable/canary/disable engines; client AI subscription quotas |
+| **Staff access** | Hierarchical RBAC (L100 Super Admin → L10 Read-only); manage only lower levels |
 | **Audit log** | Super-admin actions |
 
 ## Sandbox login

@@ -55,7 +55,8 @@ Ephemeral UI is how users interact with EPHERA — it is **not** the product’s
 | **EPHERA Connect** | Banks, telcos, partners | APIs, settlement, embedded finance adapters |
 | **EPHERA Voice** | All users | Multilingual intent compilation (not fund release) |
 | **Consumer PWA** | Browser / desktop / phone | Installable web app with logo home-screen icon |
-| **Super Admin Console** | Platform operators | Remote feature control, Temporal/workflow errors, analytics, providers, AI engines, mandates |
+| **Super Admin Console** | Platform operators | Remote feature control, Temporal/workflow errors, analytics, provider compliance, AI engines, mandates |
+| **Provider Portal** | Merchants, MMOs, banks, utilities, TPPs | Register services, country compliance packs, T&Cs, open banking & SWIFT onboarding |
 
 ### Capability highlights
 
@@ -144,8 +145,9 @@ apps/
   mobile/           Full consumer app (Expo SDK 52, RN 0.76)
   consumer-pwa/     Installable Next.js PWA (:3006)
   admin-console/    Super Admin control plane (:3007)
+  provider-portal/  Provider registration & compliance (:3008)
   merchant-web/     Merchant portal & design board
-packages/           Shared schemas, SDKs, validation, brand, tokens
+packages/           Shared schemas, SDKs, validation, brand, connect-layer (OB/SWIFT), tokens
 services/
   ledger/           Authoritative double-entry balances
   payments/         Transfer API + Temporal worker
@@ -218,6 +220,7 @@ npm run dev:voice-intent      # :8091
 # Surfaces
 npm run dev:consumer-pwa      # PWA  → http://localhost:3006
 npm run dev:admin             # Super Admin → http://localhost:3007
+npm run dev:provider          # Provider Portal → http://localhost:3008
 npm run dev:merchant          # Merchant web
 npm run mobile:lan            # Expo on LAN for physical devices
 ```
@@ -332,6 +335,7 @@ The consumer PWA already reserves an **Assets** surface so product messaging sta
 | [`docs/runbooks/local-dev.md`](docs/runbooks/local-dev.md) | Local ports and services |
 | [`docs/runbooks/MOBILE-ACCESS.md`](docs/runbooks/MOBILE-ACCESS.md) | Desktop PWA + iOS / Android access |
 | [`docs/product/ADMIN-CONSOLE.md`](docs/product/ADMIN-CONSOLE.md) | Super Admin console modules & login |
+| [`docs/product/PROVIDER-PORTAL.md`](docs/product/PROVIDER-PORTAL.md) | Provider onboarding, compliance, open banking & SWIFT |
 | [`docs/threat-model/`](docs/threat-model/) | Threat model notes |
 | [`docs/intents/first-20.md`](docs/intents/first-20.md) | Core voice intents |
 

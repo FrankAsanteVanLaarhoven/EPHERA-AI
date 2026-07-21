@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { money, pct, platformLabel, shortTime } from "@/lib/format";
 import { SecurityPanel } from "@/components/SecurityPanel";
 import { WorkflowStudio } from "@/components/WorkflowStudio";
+import { ProviderCompliancePanel } from "@/components/ProviderCompliancePanel";
+import { StaffAccessPanel } from "@/components/StaffAccessPanel";
 import type {
   AiModel,
   AiSubscription,
@@ -27,11 +29,13 @@ type Tab =
   | "analytics"
   | "features"
   | "providers"
+  | "provider_registry"
   | "users"
   | "transactions"
   | "mandates"
   | "comms"
   | "ai"
+  | "staff"
   | "audit";
 
 const TABS: { id: Tab; label: string }[] = [
@@ -41,11 +45,13 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "analytics", label: "Analytics" },
   { id: "features", label: "Feature control" },
   { id: "providers", label: "Providers & rails" },
+  { id: "provider_registry", label: "Provider compliance" },
   { id: "users", label: "Users & devices" },
   { id: "transactions", label: "Transactions" },
   { id: "mandates", label: "Mandates & DD" },
   { id: "comms", label: "Communications" },
   { id: "ai", label: "AI models" },
+  { id: "staff", label: "Staff access" },
   { id: "audit", label: "Audit log" },
 ];
 
@@ -578,9 +584,15 @@ export function AdminShell() {
           </div>
         )}
 
+        {tab === "provider_registry" && <ProviderCompliancePanel flash={flash} />}
+
         {tab === "providers" && (
           <div className="card">
             <h3>Service providers — MM, banks, open banking, utilities</h3>
+            <p className="lede" style={{ marginBottom: 12 }}>
+              Runtime rail health. Onboarding &amp; compliance docs live under{" "}
+              <strong>Provider compliance</strong> (Provider Portal → Super Admin review).
+            </p>
             <div className="table-wrap">
               <table>
                 <thead>
@@ -959,6 +971,8 @@ export function AdminShell() {
             </div>
           </div>
         )}
+
+        {tab === "staff" && <StaffAccessPanel flash={flash} />}
 
         {tab === "audit" && (
           <div className="card">
