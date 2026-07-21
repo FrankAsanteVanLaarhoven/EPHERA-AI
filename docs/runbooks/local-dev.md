@@ -69,6 +69,7 @@ MinIO console: http://localhost:9001 (ephera / ephera_dev_only)
 ```bash
 # terminals:
 npm run db:migrate
+npm run db:migrate:identity
 npm run dev:ledger            # :8092 authoritative balances
 npm run dev:payments-worker
 npm run dev:payments-api      # :8090
@@ -131,8 +132,26 @@ consumes the grant so it cannot be used twice. Start the ledger with
 (or read it from `GET :8093/v1/keys`); without it the ledger refuses every
 transfer rather than falling back to accepting an unverified string.
 
-**Grants are currently minted without any authenticator challenge.** They are
-labelled `sandbox_authenticator` in the grant, in the ledger's grant table and
-in authorisation evidence. That label is the honest statement of what the
-sandbox proves, which is that the transaction was bound and not replayed --
-not that a human approved it. Passkey verification is G2-B.
+### Authorising with a passkey
+
+The real path is WebAuthn:
+
+1. `POST :8093/v1/passkeys/register/begin` and `/finish` — register a credential
+   once per device.
+2. `POST :8093/v1/grants/challenge` — the challenge returned **is** the transfer's
+   binding digest, so the authenticator signs the transaction itself.
+3. `POST :8093/v1/grants/passkey` — a verified assertion mints a grant with
+   method `passkey`.
+
+### The sandbox authenticator
+
+`POST :8093/v1/grants` mints a grant with **no authenticator challenge at all**.
+It exists so the local demo runs without registering a credential. It is off
+unless `IDENTITY_ALLOW_SANDBOX_AUTHENTICATOR=true`, refuses to run outside a
+sandbox environment, and is refused outright for any subject that has registered
+a passkey — a weaker method is never reachable for a user who has a stronger one.
+
+Grants minted this way are labelled `sandbox_authenticator` in the grant, in the
+ledger's grant table and in authorisation evidence. That label is the honest
+statement of what they prove: the transaction was bound and not replayed, not
+that a human approved it.

@@ -15,33 +15,54 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE="$ROOT/infrastructure/docker-compose.yml"
-MIGDIR="$ROOT/services/ledger/migrations"
+
+# Each service owns its schema (ADR 0003), so migrations are per service and
+# per database. Usage: db-migrate.sh [service] [database]
+SERVICE="${1:-ledger}"
+DBNAME="${2:-ephera_${SERVICE//-/_}}"
+case "$SERVICE" in
+  ledger) DBNAME="${2:-ephera_ledger}" ;;
+  identity-access) DBNAME="${2:-ephera_identity}" ;;
+esac
+MIGDIR="$ROOT/services/$SERVICE/migrations"
+if [ ! -d "$MIGDIR" ]; then
+  echo "No migrations directory for service '$SERVICE' at $MIGDIR" >&2
+  exit 1
+fi
 
 # Override where the docker CLI on PATH is a wrapper without compose support.
 DOCKER="${DOCKER:-docker}"
 
-if [ -n "${LEDGER_DATABASE_URL:-}" ] && command -v psql >/dev/null 2>&1; then
+# A service-specific URL wins; otherwise fall back to the ledger URL with the
+# database name swapped, which is how the local stack is laid out.
+case "$SERVICE" in
+  ledger) DB_URL="${LEDGER_DATABASE_URL:-}" ;;
+  identity-access) DB_URL="${IDENTITY_DATABASE_URL:-}" ;;
+  *) DB_URL="" ;;
+esac
+
+if [ -n "$DB_URL" ] && command -v psql >/dev/null 2>&1; then
   MODE="direct"
-  run_sql() { psql "$LEDGER_DATABASE_URL" -v ON_ERROR_STOP=1 -q "$@"; }
+  run_sql() { psql "$DB_URL" -v ON_ERROR_STOP=1 -q "$@"; }
   # --single-transaction so a failed migration leaves nothing behind, and so
   # deferred constraint triggers are evaluated at commit.
-  apply_file() { psql "$LEDGER_DATABASE_URL" -v ON_ERROR_STOP=1 -q --single-transaction -f "$1"; }
+  apply_file() { psql "$DB_URL" -v ON_ERROR_STOP=1 -q --single-transaction -f "$1"; }
   wait_ready() {
     for _ in $(seq 1 30); do
-      psql "$LEDGER_DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1 && return 0
+      psql "$DB_URL" -c 'SELECT 1' >/dev/null 2>&1 && return 0
       sleep 1
     done
-    echo "Database not reachable at LEDGER_DATABASE_URL" >&2
+    echo "Database not reachable for service $SERVICE" >&2
     return 1
   }
 else
   MODE="compose"
-  run_sql() { "$DOCKER" compose -f "$COMPOSE" exec -T postgres psql -U ephera -d ephera_ledger -v ON_ERROR_STOP=1 -q "$@"; }
+  run_sql() { "$DOCKER" compose -f "$COMPOSE" exec -T postgres psql -U ephera -d "$DBNAME" -v ON_ERROR_STOP=1 -q "$@"; }
   # The container cannot see host paths, so the file is piped in on stdin.
   apply_file() { run_sql --single-transaction < "$1"; }
   wait_ready() {
     for _ in $(seq 1 30); do
-      "$DOCKER" compose -f "$COMPOSE" exec -T postgres pg_isready -U ephera -d ephera_ledger >/dev/null 2>&1 && return 0
+      "$DOCKER" compose -f "$COMPOSE" exec -T postgres pg_isready -U ephera -d "$DBNAME" >/dev/null 2>&1 && return 0
       sleep 1
     done
     echo "Postgres container not ready" >&2
@@ -49,7 +70,7 @@ else
   }
 fi
 
-echo "Migration target: $MODE"
+echo "Migration target: $MODE · service $SERVICE · database $DBNAME"
 wait_ready
 
 run_sql <<'SQL'

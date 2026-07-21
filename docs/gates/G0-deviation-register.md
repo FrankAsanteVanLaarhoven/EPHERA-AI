@@ -29,14 +29,14 @@ Closed at G1 — see [`G1-report.md`](G1-report.md) for evidence.
 | D-21 | S2 | Versioned migrations with a `schema_migrations` table, checksums and drift detection. Re-running is a no-op |
 | D-22 | S3 | The freeze path no longer discards its evidence-write error; a freeze that cannot be evidenced does not commit |
 
-Reduced at G2-A — see [`G2-report.md`](G2-report.md).
+Reduced at G2-A and G2-B — see [`G2-report.md`](G2-report.md).
 
 | ID | Sev | State |
 | --- | --- | --- |
-| D-01 | S1 | **Reduced, not closed.** The authorisation reference is now a signed, transaction-bound, single-use grant that the ledger verifies itself and consumes. Forgery, repointing and replay are closed. What remains is that identity-access mints without an authenticator challenge, so a grant proves binding and freshness, not that a human approved. Closes with passkey verification (G2-B) |
+| D-01 | S1 | **Reduced, not closed.** The authorisation reference is now a signed, transaction-bound, single-use grant that the ledger verifies itself and consumes; forgery, repointing and replay are closed. WebAuthn registration and assertion verification exist and are tested, with the assertion challenge set to the transfer's binding digest. What remains is that no client performs the ceremony yet, so the demo still uses the sandbox authenticator. Closes when a real device signs a real transfer (G2-B(ii)) |
 | D-07 | S1 | The console's hardcoded literal no longer authorises anything at the ledger. The console still has no authentication of its own (G2-C) |
 | D-31 | S1 | The browser surface can no longer mint its own reference; it obtains a grant. Subject to the same G2-B caveat |
-| D-32 | S1 | The mock no longer produces anything the ledger accepts. It remains as the on-device confirmation step until G2-B replaces it |
+| D-32 | S1 | The mock no longer produces anything the ledger accepts. It remains as the on-device confirmation step until the client ceremonies land |
 | D-34 | S1 | The idempotency key is derived from the intent and amount rather than the clock, so a retry is the same transfer. A repeat also now fails on grant single use |
 | D-19 | S2 | One fee function serves quote, prepare, grant binding and capture |
 

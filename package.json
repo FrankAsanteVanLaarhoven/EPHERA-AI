@@ -33,6 +33,7 @@
     "infra:down": "docker compose -f infrastructure/docker-compose.yml down",
     "infra:logs": "docker compose -f infrastructure/docker-compose.yml logs -f",
     "db:migrate": "./scripts/db-migrate.sh",
+    "db:migrate:identity": "./scripts/db-migrate.sh identity-access",
     "db:psql": "docker compose -f infrastructure/docker-compose.yml exec postgres psql -U ephera -d ephera_ledger",
     "dev:payments-api": "./scripts/run-payments-api.sh",
     "dev:payments-worker": "./scripts/run-payments-worker.sh",

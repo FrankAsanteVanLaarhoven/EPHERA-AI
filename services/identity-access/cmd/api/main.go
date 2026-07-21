@@ -4,23 +4,25 @@
 // single-use assertion bound to one exact transaction, verified offline by the
 // ledger (ADR 0002).
 //
-// # What this service does and does not do yet
+// # Two ways to obtain a grant
 //
-// It holds the signing key and binds every grant to the transaction the user
-// confirmed. That is what makes forgery and replay impossible at the ledger.
+// The real path is a WebAuthn passkey. The challenge the authenticator signs is
+// the transaction's binding digest, so the device signature covers the exact
+// transfer the user approved -- not an opaque random value that could be
+// presented for anything else. A grant minted this way carries method
+// `passkey`.
 //
-// It does NOT yet verify a passkey. The gate in front of minting is a sandbox
-// authenticator that performs no challenge, and every grant it issues is
-// labelled `sandbox_authenticator` in the grant, in the ledger's grant table
-// and in authorisation evidence -- so a sandbox authorisation can never be
-// mistaken for a real one downstream (ADR 0009). Real WebAuthn registration and
-// assertion verification is G2-B, and until it lands D-01 is reduced, not
-// closed.
-//
-// The sandbox authenticator refuses to start outside a sandbox environment.
+// The other path is a sandbox authenticator that performs no challenge at all.
+// It is off unless IDENTITY_ALLOW_SANDBOX_AUTHENTICATOR=true, refuses to run
+// outside a sandbox environment, and is refused outright for any subject that
+// has registered a passkey. Every grant it issues is labelled
+// `sandbox_authenticator` in the grant, in the ledger's grant table and in
+// authorisation evidence, so it can never be mistaken downstream for evidence
+// that a human approved anything (ADR 0009).
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
@@ -28,9 +30,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ephera/authgrant"
+	"github.com/ephera/identity-access/internal/passkey"
+	"github.com/ephera/identity-access/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -38,6 +43,8 @@ type server struct {
 	priv        ed25519.PrivateKey
 	pub         ed25519.PublicKey
 	sandboxMint bool
+	store       *store.Store
+	passkeys    *passkey.Service
 }
 
 func main() {
@@ -50,19 +57,42 @@ func main() {
 	}
 
 	// The sandbox authenticator mints grants without any authenticator
-	// challenge. It is a demonstration affordance and must never be reachable
-	// where real money or real identity data could be involved.
-	sandboxMint := environment == "local" || environment == "sandbox"
-	if !sandboxMint {
-		log.Printf("EPHERA_ENV=%q: sandbox authenticator disabled; "+
-			"no grant can be minted until passkey verification is implemented (G2-B)", environment)
+	// challenge. It is opt-in and off by default: passkey verification is the
+	// real path, and a deployment must say explicitly that it wants the weaker
+	// one. It additionally refuses to run outside a sandbox environment.
+	sandboxMint := os.Getenv("IDENTITY_ALLOW_SANDBOX_AUTHENTICATOR") == "true" &&
+		(environment == "local" || environment == "sandbox")
+	if sandboxMint {
+		log.Printf("WARNING: sandbox authenticator enabled. Grants can be minted with no " +
+			"authenticator challenge. Every such grant is labelled sandbox_authenticator.")
+	} else {
+		log.Printf("sandbox authenticator disabled; a registered passkey is required to mint a grant")
 	}
 
-	s := &server{priv: priv, pub: pub, sandboxMint: sandboxMint}
+	ctx := context.Background()
+	st, err := store.New(ctx, env("IDENTITY_DATABASE_URL",
+		"postgres://ephera:ephera_dev_only@localhost:5433/ephera_identity?sslmode=disable"))
+	if err != nil {
+		log.Fatalf("identity db: %v", err)
+	}
+	defer st.Close()
+
+	rpID := env("IDENTITY_RP_ID", "localhost")
+	origins := strings.Split(env("IDENTITY_RP_ORIGINS", "http://localhost:3006,http://localhost:8081"), ",")
+	pk, err := passkey.New(rpID, "EPHERA", origins)
+	if err != nil {
+		log.Fatalf("passkey service: %v", err)
+	}
+
+	s := &server{priv: priv, pub: pub, sandboxMint: sandboxMint, store: st, passkeys: pk}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /v1/keys", s.keys)
+	mux.HandleFunc("POST /v1/passkeys/register/begin", s.passkeyRegisterBegin)
+	mux.HandleFunc("POST /v1/passkeys/register/finish", s.passkeyRegisterFinish)
+	mux.HandleFunc("POST /v1/grants/challenge", s.grantChallenge)
+	mux.HandleFunc("POST /v1/grants/passkey", s.mintWithPasskey)
 	mux.HandleFunc("POST /v1/grants", s.mintGrant)
 
 	log.Printf("EPHERA identity-access on %s (env %s)", httpAddr, environment)
@@ -102,7 +132,7 @@ func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 		"status":               "ok",
 		"service":              "identity-access",
 		"sandboxAuthenticator": s.sandboxMint,
-		"passkeyVerification":  false,
+		"passkeyVerification":  true,
 	})
 }
 
@@ -126,12 +156,29 @@ type grantRequest struct {
 	TransferID      string `json:"transferId"`
 }
 
+func validateGrantRequest(req *grantRequest) error {
+	if req.Subject == "" {
+		req.Subject = req.FromExternalRef
+	}
+	if req.Subject == "" || req.FromExternalRef == "" || req.ToExternalRef == "" ||
+		req.TransferID == "" || req.Currency == "" {
+		return fmt.Errorf("subject, fromExternalRef, toExternalRef, transferId and currency are required")
+	}
+	if req.AmountMinor <= 0 {
+		return fmt.Errorf("amountMinor must be positive")
+	}
+	return nil
+}
+
+// mintGrant is the sandbox path: no authenticator challenge, opt-in, and
+// refused for any subject that has registered a passkey. A weaker method must
+// never be reachable for a user who has a stronger one.
 func (s *server) mintGrant(w http.ResponseWriter, r *http.Request) {
 	if !s.sandboxMint {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": "no_authenticator",
-			"message": "Passkey verification is not implemented (G2-B) and the sandbox " +
-				"authenticator is disabled outside sandbox environments.",
+			"message": "The sandbox authenticator is disabled. Register a passkey and use " +
+				"/v1/grants/challenge then /v1/grants/passkey.",
 		})
 		return
 	}
@@ -141,33 +188,26 @@ func (s *server) mintGrant(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if req.Subject == "" {
-		req.Subject = req.FromExternalRef
-	}
-	if req.Subject == "" || req.FromExternalRef == "" || req.ToExternalRef == "" ||
-		req.TransferID == "" || req.Currency == "" {
-		http.Error(w, "subject, fromExternalRef, toExternalRef, transferId and currency are required",
-			http.StatusBadRequest)
-		return
-	}
-	if req.AmountMinor <= 0 {
-		http.Error(w, "amountMinor must be positive", http.StatusBadRequest)
+	if err := validateGrantRequest(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// NOTE: this is the point at which a passkey assertion must be verified.
-	// Until G2-B there is no challenge here, which is why the method below says
-	// exactly that and travels with the grant all the way into evidence.
+	hasPasskey, err := s.store.HasCredential(r.Context(), req.Subject)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if hasPasskey {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error":   "passkey_required",
+			"message": "This subject has a registered passkey; the sandbox authenticator cannot be used.",
+		})
+		return
+	}
 
 	now := time.Now()
-	binding := authgrant.Binding{
-		FromExternalRef: req.FromExternalRef,
-		ToExternalRef:   req.ToExternalRef,
-		AmountMinor:     req.AmountMinor,
-		FeeMinor:        req.FeeMinor,
-		Currency:        req.Currency,
-		TransferID:      req.TransferID,
-	}
+	binding := bindingOf(req)
 
 	grant, err := authgrant.Mint(s.priv, authgrant.Payload{
 		ID:        "grant_" + uuid.NewString(),

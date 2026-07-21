@@ -1,11 +1,14 @@
-# Gate G2-A — authorisation becomes a credential
+# Gate G2-A and G2-B — authorisation becomes a credential
 
-**Scope:** the first of three G2 increments. The authorisation reference stops
-being a string and becomes a signed, transaction-bound, single-use grant that
-the ledger verifies itself.
+**Scope:** two of three G2 increments.
+**G2-A** — the authorisation reference stops being a string and becomes a
+signed, transaction-bound, single-use grant that the ledger verifies itself.
+**G2-B** — grants are minted only after a verified WebAuthn passkey assertion
+whose challenge is the transaction's binding digest.
 **Exit condition (programme, full G2):** no password-only administration;
 negative authorisation tests pass.
-**Verdict:** PASS WITH LIMITATIONS — G2-A is complete; G2 is not. See section 9.
+**Verdict:** PASS WITH LIMITATIONS — G2-A and G2-B are complete server-side;
+G2 is not. See section 9.
 
 ## 1. Evidence and assumptions
 
@@ -28,6 +31,11 @@ unreachable.
 | --- | --- |
 | `services/authgrant/` | New module. Grant format, binding digest, mint and verify, 9 test functions |
 | `services/identity-access/` | New service on :8093. Holds the signing key, publishes the public key, mints grants |
+| `services/identity-access/migrations/001_identity.sql` | New (G2-B). Credentials, users and single-use ceremony challenges, in a separate database from the ledger |
+| `services/identity-access/internal/store/` | New (G2-B). Credential and challenge persistence; public keys only |
+| `services/identity-access/internal/passkey/` | New (G2-B). WebAuthn registration and assertion ceremonies |
+| `services/identity-access/cmd/api/passkey_routes.go` | New (G2-B). Register, challenge and passkey-mint endpoints |
+| `services/identity-access/internal/passkey/*_test.go` | New (G2-B). A software authenticator and 5 ceremony tests |
 | `services/ledger/migrations/005_authorisation_grants.sql` | New. Grant consumption table; evidence records method and grant reference |
 | `services/ledger/internal/store/authorisation.go` | New. Grant verification and fail-closed key handling |
 | `services/ledger/internal/store/store.go` | Capture verifies and consumes a grant; evidence records the real method |
@@ -57,7 +65,7 @@ is what gets recorded (ADR 0009).
 | `go test ./...` in `services/authgrant` | ok — 9 tests including binding tamper cases |
 | `go test ./...` in `services/ledger` with a database | ok — 20 tests |
 | `go test ./...` / `go vet` in `services/payments` | ok |
-| `go build`, `go vet` in `services/identity-access` | ok |
+| `go test ./...` in `services/identity-access` | ok — 5 ceremony tests, 8 cases |
 | `./scripts/db-migrate.sh` | 1 applied, 4 already present; re-run a no-op |
 | `npm run typecheck` and `build` for consumer-pwa | ok |
 | `cargo test`, voice `pytest` | 11 and 4 passed |
@@ -93,22 +101,27 @@ and it is the first half of `QUOTED → AWAITING_AUTHORISATION` from ADR 0006.
 
 ## 6. Mitigations and residual risks
 
-**The most important limitation, stated plainly: identity-access does not yet
-verify a passkey.** The gate in front of minting performs no authenticator
-challenge. A grant currently proves that a transaction was bound and has not
-been replayed. It does not prove that a human approved it.
+G2-B closes the limitation G2-A left open. A grant with method `passkey` is
+minted only after a WebAuthn assertion has been verified against a registered,
+device-bound credential — and the challenge that assertion signs is the
+transfer's binding digest, so the device signature covers the exact transaction
+rather than an opaque value that could be presented for anything else.
 
-This is labelled rather than hidden. Every such grant carries
-`sandbox_authenticator` in the grant itself, in the ledger's grant table and in
-authorisation evidence, and the minting endpoint returns a warning string and
-refuses to run outside a sandbox environment. Anyone reading a transfer's
-evidence can tell what did and did not happen.
+What is genuinely closed across both increments: forgery by any party without
+the signing key; repointing a grant or an assertion to a different amount,
+recipient, sender, fee or currency; replay of a spent grant or a spent
+challenge; assertions from a different origin or relying party; assertions
+signed by any key other than the registered credential; indefinite validity;
+and the ledger accepting an authorisation it has not verified. The ledger fails
+closed with no key configured, and the authenticator counter is stored so clone
+warnings surface.
 
-What is genuinely closed: forgery by any party without the signing key;
-repointing a grant to a different amount, recipient, sender, fee or currency;
-replay of a spent grant; indefinite validity; and the ledger accepting an
-authorisation it has not verified. The ledger fails closed with no key
-configured.
+The sandbox authenticator still exists so the local demo runs without a
+registered credential. It is now **off unless explicitly enabled**, refuses to
+run outside a sandbox environment, and is **refused outright for any subject
+that has registered a passkey** — a weaker method is never reachable for a user
+who has a stronger one. Its grants remain labelled `sandbox_authenticator`
+through to evidence.
 
 Residual risks:
 
@@ -121,6 +134,14 @@ Residual risks:
 - Freeze and airtime still take an unbound grant: the pre-check confirms a grant
   was supplied and parses, but neither flow binds to one. Freeze changes account
   state and deserves the same treatment.
+- **No client performs the ceremony yet.** Registration and assertion are
+  verified server-side and tested with a software authenticator, but the mobile
+  app and browser surface still call the sandbox mint endpoint. Until they are
+  wired, the sandbox authenticator is what the demo actually exercises. Native
+  passkeys additionally need an Expo development build.
+- Relying-party identity defaults to `localhost` with development origins. Real
+  values are a deployment decision and must be set before any device registers a
+  credential it expects to keep working.
 - The mobile application could not be type-checked here. It is not in the npm
   workspaces and has no typecheck script, so its edits are unverified by any
   tool — a gap that should become a register entry.
@@ -149,25 +170,29 @@ statement of what the sandbox authenticator does and does not prove.
 
 **PASS WITH LIMITATIONS.**
 
-G2-A is complete: the authorisation boundary exists, is verified by the
-authority, and is tested against forgery, repointing and replay both in unit
-tests and end-to-end against running services.
+G2-A and G2-B are complete on the server. The authorisation boundary exists, is
+verified by the authority that owns the money, and is tested against forgery,
+repointing, replay and origin substitution — in unit tests, in WebAuthn ceremony
+tests driven by a software authenticator, and end to end against running
+services.
 
-G2 as a whole is **not** met. Its exit condition is no password-only
-administration and passing negative authorisation tests. The negative tests pass.
-Administration is untouched — the operator console still has no server-side
-authentication at all.
+G2 as a whole is **not** met, for two reasons stated plainly:
+
+1. **No client performs the passkey ceremony.** The verification path is real
+   and tested, but the surfaces still use the sandbox authenticator. D-01 is not
+   closed until a real device signs a real transfer.
+2. **Administration is untouched.** The gate's exit condition includes no
+   password-only administration. The operator console still has no server-side
+   authentication at all.
 
 Remaining G2 work, in order:
 
-- **G2-B — passkey verification.** WebAuthn registration and assertion
-  verification in identity-access, so a grant is minted only after a real
-  device-bound challenge. Then remove the sandbox authenticator and the mock.
-  D-01 closes here, not before.
+- **G2-B(ii) — client ceremonies.** Browser WebAuthn in the consumer surface,
+  native passkeys in an Expo development build. Then remove the mock module and
+  disable the sandbox authenticator by default. D-01 closes here.
 - **G2-C — operator identity.** `platform-control-bff` with SSO, server-side
   role checks, maker-checker and just-in-time elevation, closing D-06, D-12,
   D-13 and the rest of D-07.
 
-Doing G2-C before G2-B would produce a console that authenticates its operator
-and still forwards an unverified customer authorisation, which is the weaker
-half of the problem.
+Doing G2-C before the client work would produce a console that authenticates its
+operator and still forwards an authorisation no device ever signed.
