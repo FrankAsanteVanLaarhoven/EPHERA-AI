@@ -5,6 +5,7 @@ import { money, pct, platformLabel, shortTime } from "@/lib/format";
 import { SecurityPanel } from "@/components/SecurityPanel";
 import { WorkflowStudio } from "@/components/WorkflowStudio";
 import { ProviderCompliancePanel } from "@/components/ProviderCompliancePanel";
+import { ControlPlanePanel } from "./ControlPlanePanel";
 import { StaffAccessPanel } from "@/components/StaffAccessPanel";
 import type {
   AiModel,
@@ -23,6 +24,7 @@ import type {
 } from "@/lib/types";
 
 type Tab =
+  | "control"
   | "overview"
   | "workflows"
   | "security"
@@ -39,6 +41,7 @@ type Tab =
   | "audit";
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: "control", label: "Control plane" },
   { id: "overview", label: "Command centre" },
   { id: "workflows", label: "Workflow studio" },
   { id: "security", label: "Security questions" },
@@ -55,11 +58,9 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "audit", label: "Audit log" },
 ];
 
-const AUTH_KEY = "ephera_superadmin_session";
 
 export function AdminShell() {
-  const [authed, setAuthed] = useState(false);
-  const [password, setPassword] = useState("");
+  const [authed] = useState(true);
   const [tab, setTab] = useState<Tab>("overview");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -79,12 +80,6 @@ export function AdminShell() {
   const [regions, setRegions] = useState<RegionVolume[]>([]);
   const [hourly, setHourly] = useState<number[]>([]);
   const [temporalConnected, setTemporalConnected] = useState(false);
-
-  useEffect(() => {
-    if (typeof window !== "undefined" && sessionStorage.getItem(AUTH_KEY) === "1") {
-      setAuthed(true);
-    }
-  }, []);
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -164,19 +159,6 @@ export function AdminShell() {
     [workflows],
   );
 
-  function login(e: React.FormEvent) {
-    e.preventDefault();
-    // The previous gate compared a password in the browser against a value
-    // printed on this very screen and in the README, and the server never saw
-    // it (D-06). It is gone rather than left in place looking like protection.
-    //
-    // Operator authentication is a passkey ceremony against identity-access,
-    // which mints a session that platform-control-bff verifies. This console
-    // does not yet perform it, so it opens read-only and can change nothing.
-    sessionStorage.setItem(AUTH_KEY, "1");
-    setAuthed(true);
-  }
-
   async function patchFeature(id: string, _enabled: boolean, _rolloutPercent?: number) {
     flash("Feature changes move through platform-control-bff: propose, second operator approves, then apply.");
   }
@@ -201,41 +183,12 @@ export function AdminShell() {
     flash("Break-glass actions move through platform-control-bff: they are proposed, approved by a second operator, and audited.");
   }
 
-  if (!authed) {
-    return (
-      <div className="login">
-        <form className="card login-card" onSubmit={login}>
-          <div className="brand" style={{ border: 0, margin: 0, padding: 0 }}>
-            <div className="brand-mark">EPH</div>
-            <div>
-              <h1>EPHERA SUPER ADMIN</h1>
-              <p>Control plane · sandbox</p>
-            </div>
-          </div>
-          <h2 style={{ marginTop: 18 }}>Authenticate</h2>
-          <p>
-            Restricted operations console for workflows, rails, feature flags, AI engines, and
-            banking-style mandates. Not for end customers.
-          </p>
-          <input
-            type="password"
-            placeholder="Super admin password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoFocus
-          />
-          <button className="btn" type="submit" style={{ width: "100%" }}>
-            Enter control plane
-          </button>
-          <p className="footer-note">
-            Read-only. State changes are made in platform-control-bff, which requires
-            a passkey-authenticated operator session and a second approver.
-          </p>
-          {toast && <p style={{ color: "var(--danger)", fontSize: 13 }}>{toast}</p>}
-        </form>
-      </div>
-    );
-  }
+  // There is no console-level gate. The previous one compared a password in
+  // the browser against a value printed on its own screen, and the server never
+  // saw it (D-06). The console is read-only; the control-plane tab performs a
+  // real passkey login against identity-access, and every state change is
+  // authorised, approved and audited by platform-control-bff.
+
 
   const title = TABS.find((t) => t.id === tab)?.label || "Admin";
 
@@ -270,8 +223,10 @@ export function AdminShell() {
             type="button"
             className="btn ghost"
             onClick={() => {
-              sessionStorage.removeItem(AUTH_KEY);
-              setAuthed(false);
+              // Signing out means dropping the operator session; the console
+              // itself holds no authority to sign out of.
+              sessionStorage.removeItem("ephera_operator_session");
+              flash("Operator session cleared. Sign in again on the control plane tab.");
             }}
           >
             Sign out
@@ -304,6 +259,8 @@ export function AdminShell() {
         </div>
 
         {toast && <div className="card toast">{toast}</div>}
+
+        {tab === "control" && <ControlPlanePanel />}
 
         {tab === "overview" && overview && (
           <>

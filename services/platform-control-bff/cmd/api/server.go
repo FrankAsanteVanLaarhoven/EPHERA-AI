@@ -35,9 +35,10 @@ import (
 )
 
 type server struct {
-	store     *store.Store
-	sessionPK []byte // ed25519 public key of identity-access
-	now       func() time.Time
+	store          *store.Store
+	sessionPK      []byte // ed25519 public key of identity-access
+	allowedOrigins []string
+	now            func() time.Time
 }
 
 type principal struct {
@@ -118,6 +119,30 @@ func (s *server) audit(ctx context.Context, pr principal, action, target, outcom
 	})
 }
 
+// withCORS allows exactly the configured console origins. It is an allowlist
+// rather than "*" deliberately: these endpoints carry an operator session in an
+// Authorization header, and a wildcard origin on a credentialed control plane
+// is how a console page on any site gets to act as an operator.
+func withCORS(next http.Handler, allowed []string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		for _, a := range allowed {
+			if origin != "" && origin == a {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+				break
+			}
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
@@ -127,7 +152,34 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/changes/{id}/apply", s.applyChange)
 	mux.HandleFunc("GET /v1/changes/{id}", s.getChange)
 	mux.HandleFunc("GET /v1/audit/verify", s.verifyAudit)
-	return mux
+	mux.HandleFunc("GET /v1/changes", s.listChanges)
+	mux.HandleFunc("GET /v1/audit", s.listAudit)
+	return withCORS(mux, s.allowedOrigins)
+}
+
+// listChanges returns the change queue an approver works from.
+func (s *server) listChanges(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.require(w, r, authz.PermViewOperations, "change.list", "change_requests"); !ok {
+		return
+	}
+	items, err := s.store.ListChangeRequests(r.Context(), 50)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *server) listAudit(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.require(w, r, authz.PermViewAudit, "audit.list", "audit_log"); !ok {
+		return
+	}
+	items, err := s.store.ListAudit(r.Context(), 100)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/ephera/platform-control-bff/internal/store"
 )
@@ -35,7 +36,8 @@ func main() {
 			"Every request will be refused until an operator session key is configured.")
 	}
 
-	s := &server{store: st, sessionPK: pk}
+	origins := strings.Split(env("CONTROL_ALLOWED_ORIGINS", "http://localhost:3007"), ",")
+	s := &server{store: st, sessionPK: pk, allowedOrigins: origins}
 	log.Printf("EPHERA platform-control-bff on %s", addr)
 	if err := http.ListenAndServe(addr, s.routes()); err != nil {
 		log.Fatal(err)

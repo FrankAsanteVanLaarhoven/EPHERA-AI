@@ -320,3 +320,64 @@ func (s *Store) VerifyChain(ctx context.Context) (int64, error) {
 	}
 	return 0, rows.Err()
 }
+
+// ListChangeRequests returns the most recent requests, newest first.
+func (s *Store) ListChangeRequests(ctx context.Context, limit int) ([]ChangeRequest, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, action, target, payload, reason, status, requested_by, requested_at,
+		       decided_by, decided_at, decision_note, expires_at
+		FROM change_requests ORDER BY requested_at DESC LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []ChangeRequest{}
+	for rows.Next() {
+		var cr ChangeRequest
+		var payload []byte
+		if err := rows.Scan(&cr.ID, &cr.Action, &cr.Target, &payload, &cr.Reason, &cr.Status,
+			&cr.RequestedBy, &cr.RequestedAt, &cr.DecidedBy, &cr.DecidedAt, &cr.DecisionNote,
+			&cr.ExpiresAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(payload, &cr.Payload)
+		out = append(out, cr)
+	}
+	return out, rows.Err()
+}
+
+// AuditRow is one entry as presented to an operator.
+type AuditRow struct {
+	Seq         int64     `json:"seq"`
+	At          time.Time `json:"at"`
+	Actor       string    `json:"actor"`
+	ActorMethod string    `json:"actorMethod"`
+	Action      string    `json:"action"`
+	Target      string    `json:"target"`
+	Outcome     string    `json:"outcome"`
+	EntryHash   string    `json:"entryHash"`
+}
+
+func (s *Store) ListAudit(ctx context.Context, limit int) ([]AuditRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT seq, at, actor, actor_method, action, target, outcome, entry_hash
+		FROM audit_log ORDER BY seq DESC LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []AuditRow{}
+	for rows.Next() {
+		var a AuditRow
+		if err := rows.Scan(&a.Seq, &a.At, &a.Actor, &a.ActorMethod, &a.Action,
+			&a.Target, &a.Outcome, &a.EntryHash); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}

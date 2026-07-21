@@ -72,6 +72,31 @@ the service.
 | `go vet` in both | clean |
 | `./scripts/db-migrate.sh platform-control-bff` | applied; re-run a no-op |
 
+### Demonstrated in a real browser
+
+Two operators, two virtual authenticators, real WebAuthn:
+
+| Step | Result |
+| --- | --- |
+| Maker registers a passkey and signs in | roles `ops_manager` |
+| Maker proposes `wallet.freeze` with a reason | status `pending` |
+| **Maker sees zero Approve buttons** | cannot approve their own change |
+| Checker registers, signs in | roles `approver, ops_manager` |
+| Checker approves, then applies | status `applied`, decided by the checker |
+| Audit chain | **verified** |
+
+The audit trail from that run, newest first:
+
+```
+ops.checker@ephera.internal | passkey | wallet.freeze | applied
+ops.checker@ephera.internal | passkey | change.decide | allowed
+ops.maker@ephera.internal   | passkey | wallet.freeze | allowed
+support.agent@ephera.internal | passkey | wallet.freeze | denied
+anonymous                   | none    | wallet.freeze | denied
+```
+
+`SELECT count(*) FROM change_requests WHERE decided_by = requested_by` returns 0.
+
 The twelve tests are the gate's exit condition. Each describes something the
 previous console permitted:
 
@@ -111,12 +136,14 @@ because a test verifies the chain rather than assuming it.
 
 ## 6. Mitigations and residual risks
 
-- **The console is read-only, not migrated.** Every mutating handler has been
-  removed and `temporal/start` — the route that moved money with a hardcoded
-  authorisation literal — is deleted. The exposure is gone. What has not
-  happened is the rebuild: the console does not yet perform an operator login or
-  call the control plane, so the propose/approve workflow has no interface. The
-  console reads its own in-memory seed data, so **D-15 remains open**.
+- **The console now has a control-plane surface.** Operators sign in with a
+  passkey and propose, approve and apply changes through the control plane, with
+  the audit chain verified on every load. The legacy tabs still read in-memory
+  seed data, so **D-15 remains open for those reads** — they belong to services
+  that do not exist yet (customers, transactions, mandates), not to the console.
+- The console-level gate is gone entirely rather than replaced. A password box
+  that accepted anything, checked in the browser against a value printed on its
+  own screen, is worse than no gate: it implies a protection that never existed.
 - The password gate is removed rather than replaced. It compared a string in the
   browser against a value printed on the login screen and in the README; the
   server never saw it. Leaving it would have implied protection that never
