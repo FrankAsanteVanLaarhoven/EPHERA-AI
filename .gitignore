@@ -63,3 +63,6 @@ coverage/
 # Test artifacts
 playwright-report/
 test-results/
+
+# Local debug / crop reference dumps
+apps/mobile/assets/_*.png
