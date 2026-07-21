@@ -6,15 +6,18 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/ephera/payments/internal/ledgerclient"
 	"github.com/ephera/payments/internal/workflow"
 	"github.com/google/uuid"
 	"go.temporal.io/sdk/client"
 )
 
 type server struct {
-	tc client.Client
+	tc     client.Client
+	ledger *ledgerclient.Client
 }
 
 type quoteRequest struct {
@@ -28,6 +31,8 @@ type transferRequest struct {
 	Currency         string `json:"currency"`
 	RecipientName    string `json:"recipientName"`
 	RecipientHint    string `json:"recipientHint"`
+	FromExternalRef  string `json:"fromExternalRef"`
+	ToExternalRef    string `json:"toExternalRef"`
 	Rail             string `json:"rail"`
 	AuthorisationRef string `json:"authorisationRef"`
 	IdempotencyKey   string `json:"idempotencyKey"`
@@ -37,6 +42,7 @@ type transferRequest struct {
 func main() {
 	addr := env("TEMPORAL_ADDRESS", "localhost:7233")
 	httpAddr := env("PAYMENTS_HTTP_ADDR", ":8090")
+	ledgerURL := env("LEDGER_URL", "http://localhost:8092")
 
 	tc, err := client.Dial(client.Options{HostPort: addr})
 	if err != nil {
@@ -44,14 +50,16 @@ func main() {
 	}
 	defer tc.Close()
 
-	s := &server{tc: tc}
+	s := &server{tc: tc, ledger: ledgerclient.New(ledgerURL)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /v1/quotes", s.quote)
 	mux.HandleFunc("POST /v1/transfers", s.transfer)
 	mux.HandleFunc("GET /v1/transfers/{id}", s.getTransfer)
+	mux.HandleFunc("GET /v1/balances/{ref}", s.balance)
+	mux.HandleFunc("POST /v1/wallet/freeze", s.freeze)
 
-	log.Printf("EPHERA payments API on %s (temporal %s)", httpAddr, addr)
+	log.Printf("EPHERA payments API on %s (temporal %s, ledger %s)", httpAddr, addr, ledgerURL)
 	if err := http.ListenAndServe(httpAddr, withCORS(mux)); err != nil {
 		log.Fatal(err)
 	}
@@ -59,6 +67,54 @@ func main() {
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "payments"})
+}
+
+func (s *server) balance(w http.ResponseWriter, r *http.Request) {
+	ref := r.PathValue("ref")
+	if ref == "" {
+		ref = "user:demo-self:GHS"
+	}
+	a, err := s.ledger.GetAccount(r.Context(), ref)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
+func (s *server) freeze(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ExternalRef      string `json:"externalRef"`
+		Reason           string `json:"reason"`
+		AuthorisationRef string `json:"authorisationRef"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if body.AuthorisationRef == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error":   "authorisation_required",
+			"message": "Passkey required to freeze wallet",
+		})
+		return
+	}
+	if body.ExternalRef == "" {
+		body.ExternalRef = "user:demo-self:GHS"
+	}
+	if body.Reason == "" {
+		body.Reason = "user_requested"
+	}
+	a, err := s.ledger.Freeze(r.Context(), body.ExternalRef, body.Reason, body.AuthorisationRef)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  a.Status,
+		"account": a,
+		"message": "Wallet frozen. Outbound transfers blocked.",
+	})
 }
 
 func (s *server) quote(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +129,6 @@ func (s *server) quote(w http.ResponseWriter, r *http.Request) {
 	if req.Rail == "" {
 		req.Rail = "mobile-money-sim"
 	}
-	// Local quote without Temporal for speed (same sim logic via short workflow not required)
 	fee := int64(0)
 	if req.AmountMinor >= 10000 {
 		fee = 50
@@ -83,7 +138,7 @@ func (s *server) quote(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"sendAmountMinor":    req.AmountMinor,
-		"receiveAmountMinor": req.AmountMinor - fee,
+		"receiveAmountMinor": req.AmountMinor,
 		"feeMinor":           fee,
 		"currency":           req.Currency,
 		"receiveCurrency":    req.Currency,
@@ -102,7 +157,7 @@ func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AuthorisationRef == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{
-			"error": "authorisation_required",
+			"error":   "authorisation_required",
 			"message": "Voice alone is never sufficient. Provide passkey authorisation reference.",
 		})
 		return
@@ -120,6 +175,12 @@ func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
 	if req.IdempotencyKey == "" {
 		req.IdempotencyKey = "idem_" + uuid.NewString()
 	}
+	if req.FromExternalRef == "" {
+		req.FromExternalRef = "user:demo-self:GHS"
+	}
+	if req.ToExternalRef == "" {
+		req.ToExternalRef = mapRecipient(req.RecipientName)
+	}
 	transferID := "tx_" + uuid.NewString()
 
 	input := workflow.DomesticTransferInput{
@@ -129,6 +190,8 @@ func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
 		Currency:         req.Currency,
 		RecipientName:    req.RecipientName,
 		RecipientHint:    req.RecipientHint,
+		FromExternalRef:  req.FromExternalRef,
+		ToExternalRef:    req.ToExternalRef,
 		Rail:             req.Rail,
 		AuthorisationRef: req.AuthorisationRef,
 		FailMode:         req.FailMode,
@@ -148,7 +211,6 @@ func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
 
 	var result workflow.DomesticTransferResult
 	if err := run.Get(ctx, &result); err != nil {
-		// Workflow may return denied with error — still surface body when possible
 		writeJSON(w, http.StatusPaymentRequired, map[string]any{
 			"transferId": transferID,
 			"workflowId": run.GetID(),
@@ -159,23 +221,34 @@ func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"transferId":   result.TransferID,
-		"workflowId":   run.GetID(),
-		"status":       result.Status,
-		"executionId":  result.ExecutionID,
-		"providerRef":  result.ProviderRef,
-		"feeMinor":     result.FeeMinor,
-		"routeSummary": result.RouteSummary,
-		"receiptId":    result.ReceiptID,
-		"message":      result.Message,
+		"transferId":     result.TransferID,
+		"workflowId":     run.GetID(),
+		"status":         result.Status,
+		"executionId":    result.ExecutionID,
+		"providerRef":    result.ProviderRef,
+		"feeMinor":       result.FeeMinor,
+		"routeSummary":   result.RouteSummary,
+		"receiptId":      result.ReceiptID,
+		"journalEntryId": result.JournalEntryID,
+		"message":        result.Message,
 	})
+}
+
+func mapRecipient(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case strings.HasPrefix(n, "ama"):
+		return "user:ama:GHS"
+	default:
+		return "user:ama:GHS"
+	}
 }
 
 func (s *server) getTransfer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	writeJSON(w, http.StatusOK, map[string]string{
 		"transferId": id,
-		"note":       "Use Temporal UI for full history in sandbox; durable query in Gate 2",
+		"note":       "Use Temporal UI for full history in sandbox",
 	})
 }
 

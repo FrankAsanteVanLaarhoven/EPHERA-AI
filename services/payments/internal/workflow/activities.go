@@ -3,36 +3,42 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/ephera/payments/internal/adapter"
 	"github.com/ephera/payments/internal/adapter/airtime"
 	"github.com/ephera/payments/internal/adapter/bank"
 	"github.com/ephera/payments/internal/adapter/mobilemoney"
+	"github.com/ephera/payments/internal/ledgerclient"
 	"github.com/google/uuid"
 )
 
-// Activities holds sandbox rails and in-memory evidence.
+// Activities holds sandbox rails + ledger client + in-memory receipts.
 type Activities struct {
-	rails    map[string]adapter.Rail
-	mu       sync.Mutex
+	rails  map[string]adapter.Rail
+	ledger *ledgerclient.Client
+	mu     sync.Mutex
+	// receipts kept in-process for sandbox GET
 	receipts map[string]Receipt
-	// postedIdempotency prevents double ledger-style posts in the worker process
-	postedIdempotency map[string]string
 }
 
 func NewActivities() *Activities {
 	mm := mobilemoney.NewSim()
 	bk := bank.NewSim()
 	at := airtime.NewSim()
+	ledgerURL := os.Getenv("LEDGER_URL")
+	if ledgerURL == "" {
+		ledgerURL = "http://localhost:8092"
+	}
 	return &Activities{
 		rails: map[string]adapter.Rail{
 			mm.Name(): mm,
 			bk.Name(): bk,
 			at.Name(): at,
 		},
-		receipts:          make(map[string]Receipt),
-		postedIdempotency: make(map[string]string),
+		ledger:   ledgerclient.New(ledgerURL),
+		receipts: make(map[string]Receipt),
 	}
 }
 
@@ -54,18 +60,18 @@ func (a *Activities) RequireAuthorisation(_ context.Context, authRef string) err
 	return nil
 }
 
-func (a *Activities) PostLedgerHold(_ context.Context, transferID, idempotencyKey string, amountMinor int64) (string, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if existing, ok := a.postedIdempotency[idempotencyKey+":hold"]; ok {
-		return existing, nil
+func (a *Activities) PostLedgerHold(ctx context.Context, fromRef, transferID, idempotencyKey string, amountMinor int64, currency string) (string, error) {
+	if fromRef == "" {
+		fromRef = "user:demo-self:GHS"
 	}
-	holdID := "hold_" + uuid.NewString()
-	a.postedIdempotency[idempotencyKey+":hold"] = holdID
-	// Sandbox: real PostgreSQL postings land when ledger HTTP service is wired.
-	_ = transferID
-	_ = amountMinor
-	return holdID, nil
+	return a.ledger.PlaceHold(ctx, fromRef, amountMinor, currency, transferID, idempotencyKey+":hold")
+}
+
+func (a *Activities) ReleaseLedgerHold(ctx context.Context, holdID string) error {
+	if holdID == "" {
+		return nil
+	}
+	return a.ledger.ReleaseHold(ctx, holdID)
 }
 
 func (a *Activities) ExecuteRail(ctx context.Context, in DomesticTransferInput) (adapter.ExecutionResult, error) {
@@ -88,14 +94,28 @@ func (a *Activities) ExecuteRail(ctx context.Context, in DomesticTransferInput) 
 	})
 }
 
-func (a *Activities) CaptureLedger(_ context.Context, idempotencyKey, holdID string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if _, ok := a.postedIdempotency[idempotencyKey+":capture"]; ok {
-		return nil
+func (a *Activities) CaptureLedger(ctx context.Context, in DomesticTransferInput, holdID string, feeMinor int64) (string, error) {
+	from := in.FromExternalRef
+	if from == "" {
+		from = "user:demo-self:GHS"
 	}
-	a.postedIdempotency[idempotencyKey+":capture"] = holdID
-	return nil
+	to := in.ToExternalRef
+	if to == "" {
+		// default sandbox recipient mapping
+		to = "user:ama:GHS"
+	}
+	return a.ledger.CaptureTransfer(ctx, map[string]any{
+		"fromExternalRef":  from,
+		"toExternalRef":    to,
+		"amountMinor":      in.AmountMinor,
+		"currency":         in.Currency,
+		"transferId":       in.TransferID,
+		"idempotencyKey":   in.IdempotencyKey + ":capture",
+		"authorisationRef": in.AuthorisationRef,
+		"holdId":           holdID,
+		"description":      fmt.Sprintf("Send to %s", in.RecipientName),
+		"feeMinor":         feeMinor,
+	})
 }
 
 func (a *Activities) CreateReceipt(_ context.Context, transferID, status, providerRef, authRef, summary string) (Receipt, error) {
@@ -137,4 +157,15 @@ func (a *Activities) ExecuteAirtime(ctx context.Context, in AirtimeInput) (adapt
 		RecipientName:    in.PhoneHint,
 		AuthorisationRef: in.AuthorisationRef,
 	})
+}
+
+func (a *Activities) FreezeWallet(ctx context.Context, externalRef, reason, authRef string) error {
+	if err := a.RequireAuthorisation(ctx, authRef); err != nil {
+		return err
+	}
+	if externalRef == "" {
+		externalRef = "user:demo-self:GHS"
+	}
+	_, err := a.ledger.Freeze(ctx, externalRef, reason, authRef)
+	return err
 }

@@ -20,7 +20,13 @@ export default function HomeScreen() {
 
       <Link href="/voice" asChild>
         <Pressable style={styles.secondaryBtn}>
-          <Text style={styles.secondaryBtnText}>Push-to-talk (stub)</Text>
+          <Text style={styles.secondaryBtnText}>Push-to-talk</Text>
+        </Pressable>
+      </Link>
+
+      <Link href="/freeze" asChild>
+        <Pressable style={[styles.secondaryBtn, { marginTop: 8, borderColor: colors.danger }]}>
+          <Text style={[styles.secondaryBtnText, { color: colors.danger }]}>Freeze wallet</Text>
         </Pressable>
       </Link>
 

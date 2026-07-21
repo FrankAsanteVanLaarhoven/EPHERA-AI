@@ -45,7 +45,7 @@ export default function VoiceScreen() {
         return;
       }
       if (data.intent?.name === "freeze_wallet") {
-        setError("Freeze wallet panel will open in a later Gate 1 increment. Intent recognised.");
+        router.push("/freeze");
         return;
       }
       setError(`Intent ${data.intent?.name} recognised (UI later).`);

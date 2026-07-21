@@ -14,6 +14,7 @@
 | Temporal UI | 8088 |
 | Payments API | **8090** |
 | Voice-intent API | **8091** |
+| Ledger API | **8092** |
 | Merchant web (dev) | 3005 |
 | Consumer PWA (dev) | 3006 |
 
@@ -42,20 +43,24 @@ MinIO console: http://localhost:9001 (ephera / ephera_dev_only)
 
 ```bash
 # terminals:
+npm run db:migrate
+npm run dev:ledger            # :8092 authoritative balances
 npm run dev:payments-worker
-npm run dev:payments-api
-npm run dev:voice-intent
+npm run dev:payments-api      # :8090
+npm run dev:voice-intent      # :8091
 ```
 
 Smoke:
 
 ```bash
-curl -s localhost:8091/health
-curl -s localhost:8090/health
+curl -s localhost:8092/v1/accounts/user:demo-self:GHS
 curl -s -X POST localhost:8091/v1/compile -H 'content-type: application/json' \
   -d '{"text":"Send 50 cedis to Ama"}'
 curl -s -X POST localhost:8090/v1/transfers -H 'content-type: application/json' \
-  -d '{"amountMinor":5000,"currency":"GHS","recipientName":"Ama","authorisationRef":"passkey_demo_12345678"}'
+  -d '{"amountMinor":5000,"currency":"GHS","recipientName":"Ama","authorisationRef":"passkey_demo_12345678","idempotencyKey":"demo-1"}'
+# balances move in Postgres ledger
+curl -s localhost:8092/v1/accounts/user:demo-self:GHS
+curl -s localhost:8092/v1/accounts/user:ama:GHS
 ```
 
 ## Mobile

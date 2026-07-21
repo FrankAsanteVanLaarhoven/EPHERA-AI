@@ -61,7 +61,9 @@ cd native/financial-core && cargo test && cd ../..
 ./scripts/db-migrate.sh
 
 # Gate 1 services (separate terminals)
-npm run dev:payments-worker
+npm run db:migrate
+npm run dev:ledger            # :8092 Postgres double-entry
+npm run dev:payments-worker   # Temporal
 npm run dev:payments-api      # :8090
 npm run dev:voice-intent      # :8091
 
@@ -92,7 +94,7 @@ Without `authorisationRef`, the API returns `401 authorisation_required`.
 | Gate | Scope | Status |
 | --- | --- | --- |
 | **0** | Monorepo, compose, ledger schema/engine, schemas, stubs | Done |
-| **1** | Payments worker/API, voice intent, passkeys mock, offline queue, mobile wiring | In progress |
+| **1** | Payments + Temporal + Postgres ledger + freeze + voice + mobile | Done (sandbox) |
 | **2** | Checkout SDK, merchant acceptance | Planned |
 | **3** | One real domestic corridor | Planned |
 

@@ -1,0 +1,107 @@
+package ledgerclient
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"time"
+)
+
+type Client struct {
+	base   string
+	client *http.Client
+}
+
+func New(base string) *Client {
+	return &Client{
+		base: base,
+		client: &http.Client{
+			Timeout: 15 * time.Second,
+		},
+	}
+}
+
+type Account struct {
+	ExternalRef string `json:"externalRef"`
+	Status      string `json:"status"`
+	Balance     int64  `json:"balanceMinor"`
+	Hold        int64  `json:"holdMinor"`
+	Available   int64  `json:"availableMinor"`
+	Currency    string `json:"currency"`
+}
+
+func (c *Client) GetAccount(ctx context.Context, ref string) (Account, error) {
+	var a Account
+	err := c.do(ctx, http.MethodGet, "/v1/accounts/"+url.PathEscape(ref), nil, &a)
+	return a, err
+}
+
+func (c *Client) PlaceHold(ctx context.Context, from string, amount int64, currency, transferID, idem string) (string, error) {
+	var out struct {
+		HoldID string `json:"holdId"`
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/holds", map[string]any{
+		"fromExternalRef": from,
+		"amountMinor":     amount,
+		"currency":        currency,
+		"transferId":      transferID,
+		"idempotencyKey":  idem,
+	}, &out)
+	return out.HoldID, err
+}
+
+func (c *Client) ReleaseHold(ctx context.Context, holdID string) error {
+	return c.do(ctx, http.MethodPost, "/v1/holds/"+url.PathEscape(holdID)+"/release", map[string]any{}, nil)
+}
+
+func (c *Client) CaptureTransfer(ctx context.Context, body map[string]any) (string, error) {
+	var out struct {
+		JournalEntryID string `json:"journalEntryId"`
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/transfers", body, &out)
+	return out.JournalEntryID, err
+}
+
+func (c *Client) Freeze(ctx context.Context, ref, reason, authRef string) (Account, error) {
+	var a Account
+	err := c.do(ctx, http.MethodPost, "/v1/accounts/"+url.PathEscape(ref)+"/freeze", map[string]any{
+		"reason":           reason,
+		"authorisationRef": authRef,
+	}, &a)
+	return a, err
+}
+
+func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rdr = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rdr)
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	res, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	data, _ := io.ReadAll(res.Body)
+	if res.StatusCode >= 300 {
+		return fmt.Errorf("ledger %s %s: %s — %s", method, path, res.Status, string(data))
+	}
+	if out == nil || len(data) == 0 {
+		return nil
+	}
+	return json.Unmarshal(data, out)
+}

@@ -47,6 +47,17 @@ jobs:
         working-directory: services/payments
         run: go test ./...
 
+  ledger-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Build ledger
+        working-directory: services/ledger
+        run: go build ./cmd/api
+
   voice-intent:
     runs-on: ubuntu-latest
     steps:
