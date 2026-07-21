@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"time"
@@ -20,7 +21,8 @@ var (
 )
 
 type Store struct {
-	pool *pgxpool.Pool
+	pool          *pgxpool.Pool
+	authPublicKey ed25519.PublicKey
 }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {
@@ -209,11 +211,14 @@ func (s *Store) CaptureTransfer(ctx context.Context, req TransferRequest) (strin
 	if err := req.validate(); err != nil {
 		return "", err
 	}
-	// Presence only. This is not authorisation: the reference is unverified and
-	// unbound to the transaction. Replacing it with a verified, single-use
-	// assertion is ADR 0002 / gate G2 (D-01).
-	if req.AuthorisationRef == "" {
-		return "", ErrUnauthorised
+
+	// The ledger is the authority, so it verifies the authorisation itself
+	// rather than trusting that an upstream service did (ADR 0002). Verification
+	// is offline: a signature check against the identity service's public key,
+	// plus a check that the grant is bound to exactly this transaction.
+	grant, err := s.verifyGrant(req)
+	if err != nil {
+		return "", err
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -336,10 +341,29 @@ func (s *Store) CaptureTransfer(ctx context.Context, req TransferRequest) (strin
 		}
 	}
 
+	// Consume the grant in the same transaction as the postings. A replay
+	// either finds this row already present or collides on the primary key,
+	// and in both cases the whole transfer rolls back. There is no window in
+	// which a replayed grant can post.
 	_, err = tx.Exec(ctx, `
-		INSERT INTO authorisation_evidence (transfer_id, method, policy_decision)
-		VALUES ($1, 'passkey', $2::jsonb)
-	`, req.TransferID, fmt.Sprintf(`{"authorisationRef":%q}`, req.AuthorisationRef))
+		INSERT INTO authorisation_grants
+			(jti, subject, method, binding_digest, transfer_id, journal_entry_id, issued_at, expires_at)
+		VALUES ($1,$2,$3,$4,$5,$6, to_timestamp($7), to_timestamp($8))
+	`, grant.ID, grant.Subject, string(grant.Method), grant.Binding, req.TransferID, jeID,
+		grant.IssuedAt, grant.ExpiresAt)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return "", ErrGrantAlreadyUsed
+		}
+		return "", err
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO authorisation_evidence (transfer_id, method, policy_decision, grant_jti)
+		VALUES ($1, $2, $3::jsonb, $4)
+	`, req.TransferID, string(grant.Method),
+		fmt.Sprintf(`{"grantId":%q,"subject":%q,"binding":%q}`, grant.ID, grant.Subject, grant.Binding),
+		grant.ID)
 	if err != nil {
 		return "", err
 	}

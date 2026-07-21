@@ -14,6 +14,7 @@ own user interface) and what the code does.
 | **S3** | Fix in the normal course of the owning gate. |
 
 Counts at G0: **S1 — 14**, **S2 — 16**, **S3 — 14**, total **44**.
+Added since: D-45 (S2), found during G1.
 
 ## Status
 
@@ -28,16 +29,28 @@ Closed at G1 — see [`G1-report.md`](G1-report.md) for evidence.
 | D-21 | S2 | Versioned migrations with a `schema_migrations` table, checksums and drift detection. Re-running is a no-op |
 | D-22 | S3 | The freeze path no longer discards its evidence-write error; a freeze that cannot be evidenced does not commit |
 
+Reduced at G2-A — see [`G2-report.md`](G2-report.md).
+
+| ID | Sev | State |
+| --- | --- | --- |
+| D-01 | S1 | **Reduced, not closed.** The authorisation reference is now a signed, transaction-bound, single-use grant that the ledger verifies itself and consumes. Forgery, repointing and replay are closed. What remains is that identity-access mints without an authenticator challenge, so a grant proves binding and freshness, not that a human approved. Closes with passkey verification (G2-B) |
+| D-07 | S1 | The console's hardcoded literal no longer authorises anything at the ledger. The console still has no authentication of its own (G2-C) |
+| D-31 | S1 | The browser surface can no longer mint its own reference; it obtains a grant. Subject to the same G2-B caveat |
+| D-32 | S1 | The mock no longer produces anything the ledger accepts. It remains as the on-device confirmation step until G2-B replaces it |
+| D-34 | S1 | The idempotency key is derived from the intent and amount rather than the clock, so a retry is the same transfer. A repeat also now fails on grant single use |
+| D-19 | S2 | One fee function serves quote, prepare, grant binding and capture |
+
 Partially addressed, decision open:
 
 | ID | Sev | State |
 | --- | --- | --- |
 | D-11 | S1 | The crate is now labelled in source and in continuous integration as specification that is **not** in the money path, and the misleading `test:ledger` script name now points at the real ledger tests. Whether to link it, keep it as specification, or retire it remains open |
 
-Everything else is unchanged from the G0 baseline. In particular **D-01 and
-D-02 remain open** — the authorisation reference is still an unverified string
-and the ledger still authenticates no caller. G1 hardened the ledger against
-malformed input; it did not give it an identity boundary. That is G2.
+Everything else is unchanged from the G0 baseline. In particular **D-02 remains
+fully open**: the ledger still authenticates no caller and permits any origin.
+An anonymous caller can no longer forge or replay an authorisation, but it can
+still reach the service. Caller authentication and network policy are G2-C and
+G8.
 
 ## Register
 
@@ -87,6 +100,7 @@ malformed input; it did not give it an identity boundary. That is G2.
 | D-42 | S3 | An entire route tree is dead code and holds the stricter logic, while roughly eight further screens are unreachable | `apps/mobile/index.js:2-4` | G1 |
 | D-43 | S3 | No client authentication of any kind. Every request is anonymous against a hardcoded account reference | `apps/mobile/lib/api.ts:13,47,77`; `apps/consumer-pwa/src/lib/api.ts:12` | G2 |
 | D-44 | S3 | Sign-in controls navigate without authenticating, and the security store reports passkeys, biometrics and a transaction PIN as enabled for mechanisms that do not exist | `apps/mobile/screens/WelcomeScreen.tsx:46-58`; `lib/security-store.ts:46-51` | G2 |
+| D-45 | S2 | The payment orchestrator has no tests on the money path. Its only test file covers one rail simulator; the transfer workflow, the activities and the ledger client are untested. Added 2026-07-21 during G1, having been missed at G0 | `services/payments/internal/workflow/`; `internal/ledgerclient/`; only test file is `internal/adapter/mobilemoney/sim_test.go` | G1/G5 |
 
 ## Absent subsystems
 

@@ -2,10 +2,13 @@ package store
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"os"
 	"testing"
+	"time"
 
+	"github.com/ephera/authgrant"
 	"github.com/google/uuid"
 )
 
@@ -19,6 +22,11 @@ import (
 // in application code, because the ledger is the authority (ADR 0001) and a
 // defect in any caller must not be able to corrupt it.
 
+// testSigner is the identity service's key for the duration of a test. Each
+// test gets a fresh pair, so a grant minted in one test cannot verify in
+// another.
+var testSigner ed25519.PrivateKey
+
 func testStore(t *testing.T) *Store {
 	t.Helper()
 	url := os.Getenv("LEDGER_TEST_DATABASE_URL")
@@ -30,7 +38,48 @@ func testStore(t *testing.T) *Store {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(st.Close)
+
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	testSigner = priv
+	st.SetAuthorisationKey(pub)
 	return st
+}
+
+// grantFor mints a grant bound to exactly the transfer described, the way the
+// identity service would.
+func grantFor(t *testing.T, req TransferRequest) string {
+	t.Helper()
+	now := time.Now()
+	binding := authgrant.Binding{
+		FromExternalRef: req.FromExternalRef,
+		ToExternalRef:   req.ToExternalRef,
+		AmountMinor:     req.AmountMinor,
+		FeeMinor:        req.FeeMinor,
+		Currency:        req.Currency,
+		TransferID:      req.TransferID,
+	}
+	g, err := authgrant.Mint(testSigner, authgrant.Payload{
+		ID:        "grant_" + uuid.NewString(),
+		Subject:   req.FromExternalRef,
+		Method:    authgrant.MethodSandboxAuthenticator,
+		Binding:   binding.Digest(),
+		IssuedAt:  now.Unix(),
+		ExpiresAt: now.Add(2 * time.Minute).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("mint grant: %v", err)
+	}
+	return g
+}
+
+// authorised fills in a grant for a transfer request built by a test.
+func authorised(t *testing.T, req TransferRequest) TransferRequest {
+	t.Helper()
+	req.AuthorisationRef = grantFor(t, req)
+	return req
 }
 
 // openWallet creates an isolated funded wallet so tests do not depend on, or
@@ -272,16 +321,17 @@ func TestTransferPostsBalancedEntry(t *testing.T) {
 	to := openWallet(t, st, "GHS", 0)
 	idem := "idem_" + uuid.NewString()
 
-	jeID, err := st.CaptureTransfer(ctx, TransferRequest{
-		FromExternalRef:  from,
-		ToExternalRef:    to,
-		AmountMinor:      30_000,
-		FeeMinor:         50,
-		Currency:         "GHS",
-		TransferID:       "tx_" + uuid.NewString(),
-		IdempotencyKey:   idem,
-		AuthorisationRef: "ref_placeholder",
+	req := authorised(t, TransferRequest{
+		FromExternalRef: from,
+		ToExternalRef:   to,
+		AmountMinor:     30_000,
+		FeeMinor:        50,
+		Currency:        "GHS",
+		TransferID:      "tx_" + uuid.NewString(),
+		IdempotencyKey:  idem,
 	})
+
+	jeID, err := st.CaptureTransfer(ctx, req)
 	if err != nil {
 		t.Fatalf("transfer: %v", err)
 	}
@@ -306,16 +356,7 @@ func TestTransferPostsBalancedEntry(t *testing.T) {
 
 	// Replaying the same idempotency key must return the same entry, not a
 	// second debit.
-	again, err := st.CaptureTransfer(ctx, TransferRequest{
-		FromExternalRef:  from,
-		ToExternalRef:    to,
-		AmountMinor:      30_000,
-		FeeMinor:         50,
-		Currency:         "GHS",
-		TransferID:       "tx_" + uuid.NewString(),
-		IdempotencyKey:   idem,
-		AuthorisationRef: "ref_placeholder",
-	})
+	again, err := st.CaptureTransfer(ctx, req)
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -335,19 +376,245 @@ func TestInsufficientFundsRefused(t *testing.T) {
 	from := openWallet(t, st, "GHS", 1_000)
 	to := openWallet(t, st, "GHS", 0)
 
-	_, err := st.CaptureTransfer(ctx, TransferRequest{
-		FromExternalRef:  from,
-		ToExternalRef:    to,
-		AmountMinor:      5_000,
-		Currency:         "GHS",
-		TransferID:       "tx_" + uuid.NewString(),
-		IdempotencyKey:   "idem_" + uuid.NewString(),
-		AuthorisationRef: "ref_placeholder",
-	})
+	_, err := st.CaptureTransfer(ctx, authorised(t, TransferRequest{
+		FromExternalRef: from,
+		ToExternalRef:   to,
+		AmountMinor:     5_000,
+		Currency:        "GHS",
+		TransferID:      "tx_" + uuid.NewString(),
+		IdempotencyKey:  "idem_" + uuid.NewString(),
+	}))
 	if !errors.Is(err, ErrInsufficientFunds) {
 		t.Fatalf("expected ErrInsufficientFunds, got %v", err)
 	}
 	if got := balanceOf(t, st, from); got != 1_000 {
 		t.Fatalf("sender balance moved: %d", got)
+	}
+}
+
+// D-01. The ledger accepted any non-empty string as authorisation. Reproduced
+// against a live ledger on 2026-07-21 with the string "aaaaaaaa". It must now
+// refuse anything that is not a grant signed by the identity service.
+func TestUnsignedAuthorisationRefused(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	from := openWallet(t, st, "GHS", 100_000)
+	to := openWallet(t, st, "GHS", 0)
+
+	fabricated := []string{
+		"aaaaaaaa",
+		"passkey_admin_console_demo",
+		"passkey_pwa_1784617797470",
+		"passkey_mock_tx_1_25000_1784617797470",
+		"ref_placeholder",
+	}
+	for _, ref := range fabricated {
+		_, err := st.CaptureTransfer(ctx, TransferRequest{
+			FromExternalRef:  from,
+			ToExternalRef:    to,
+			AmountMinor:      1_000,
+			Currency:         "GHS",
+			TransferID:       "tx_" + uuid.NewString(),
+			IdempotencyKey:   "idem_" + uuid.NewString(),
+			AuthorisationRef: ref,
+		})
+		if !errors.Is(err, ErrUnauthorised) {
+			t.Fatalf("fabricated reference %q was accepted: %v", ref, err)
+		}
+	}
+	if got := balanceOf(t, st, from); got != 100_000 {
+		t.Fatalf("balance moved: %d", got)
+	}
+}
+
+// A grant authorises one transaction. Presenting it for a different amount,
+// recipient or sender must fail even though the signature is genuine.
+func TestGrantCannotBeRepointed(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	from := openWallet(t, st, "GHS", 100_000)
+	to := openWallet(t, st, "GHS", 0)
+	attacker := openWallet(t, st, "GHS", 0)
+
+	agreed := TransferRequest{
+		FromExternalRef: from,
+		ToExternalRef:   to,
+		AmountMinor:     1_000,
+		Currency:        "GHS",
+		TransferID:      "tx_" + uuid.NewString(),
+		IdempotencyKey:  "idem_" + uuid.NewString(),
+	}
+	grant := grantFor(t, agreed)
+
+	// Same grant, larger amount.
+	inflated := agreed
+	inflated.AmountMinor = 90_000
+	inflated.AuthorisationRef = grant
+	if _, err := st.CaptureTransfer(ctx, inflated); !errors.Is(err, ErrUnauthorised) {
+		t.Fatalf("inflated amount accepted: %v", err)
+	}
+
+	// Same grant, different recipient.
+	redirected := agreed
+	redirected.ToExternalRef = attacker
+	redirected.AuthorisationRef = grant
+	if _, err := st.CaptureTransfer(ctx, redirected); !errors.Is(err, ErrUnauthorised) {
+		t.Fatalf("redirected recipient accepted: %v", err)
+	}
+
+	if got := balanceOf(t, st, from); got != 100_000 {
+		t.Fatalf("balance moved: %d", got)
+	}
+	if got := balanceOf(t, st, attacker); got != 0 {
+		t.Fatalf("attacker received funds: %d", got)
+	}
+}
+
+// Single use. A genuine grant, replayed under a fresh idempotency key, must be
+// refused -- otherwise one authorisation drains an account.
+func TestGrantIsSingleUse(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	from := openWallet(t, st, "GHS", 100_000)
+	to := openWallet(t, st, "GHS", 0)
+
+	req := authorised(t, TransferRequest{
+		FromExternalRef: from,
+		ToExternalRef:   to,
+		AmountMinor:     10_000,
+		Currency:        "GHS",
+		TransferID:      "tx_" + uuid.NewString(),
+		IdempotencyKey:  "idem_" + uuid.NewString(),
+	})
+	if _, err := st.CaptureTransfer(ctx, req); err != nil {
+		t.Fatalf("first use: %v", err)
+	}
+
+	replay := req
+	replay.IdempotencyKey = "idem_" + uuid.NewString()
+	if _, err := st.CaptureTransfer(ctx, replay); !errors.Is(err, ErrGrantAlreadyUsed) {
+		t.Fatalf("expected ErrGrantAlreadyUsed, got %v", err)
+	}
+
+	if got := balanceOf(t, st, from); got != 90_000 {
+		t.Fatalf("replay moved money: %d", got)
+	}
+	if got := balanceOf(t, st, to); got != 10_000 {
+		t.Fatalf("recipient credited twice: %d", got)
+	}
+}
+
+// A grant signed by anyone other than the configured issuer key is worthless.
+func TestGrantFromAnotherSignerRefused(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	from := openWallet(t, st, "GHS", 100_000)
+	to := openWallet(t, st, "GHS", 0)
+
+	req := TransferRequest{
+		FromExternalRef: from,
+		ToExternalRef:   to,
+		AmountMinor:     1_000,
+		Currency:        "GHS",
+		TransferID:      "tx_" + uuid.NewString(),
+		IdempotencyKey:  "idem_" + uuid.NewString(),
+	}
+
+	// An attacker with their own key mints a perfectly well-formed grant.
+	_, rogue, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	binding := authgrant.Binding{
+		FromExternalRef: req.FromExternalRef,
+		ToExternalRef:   req.ToExternalRef,
+		AmountMinor:     req.AmountMinor,
+		Currency:        req.Currency,
+		TransferID:      req.TransferID,
+	}
+	forged, err := authgrant.Mint(rogue, authgrant.Payload{
+		ID:        "grant_" + uuid.NewString(),
+		Subject:   req.FromExternalRef,
+		Method:    authgrant.MethodPasskey,
+		Binding:   binding.Digest(),
+		IssuedAt:  time.Now().Unix(),
+		ExpiresAt: time.Now().Add(time.Minute).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	req.AuthorisationRef = forged
+
+	if _, err := st.CaptureTransfer(ctx, req); !errors.Is(err, ErrUnauthorised) {
+		t.Fatalf("grant from an unknown signer accepted: %v", err)
+	}
+	if got := balanceOf(t, st, from); got != 100_000 {
+		t.Fatalf("balance moved: %d", got)
+	}
+}
+
+// With no public key the ledger cannot tell a real grant from a forged one, so
+// it must refuse every transfer rather than fall back to accepting a string.
+func TestLedgerFailsClosedWithoutAKey(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	from := openWallet(t, st, "GHS", 100_000)
+	to := openWallet(t, st, "GHS", 0)
+	req := authorised(t, TransferRequest{
+		FromExternalRef: from,
+		ToExternalRef:   to,
+		AmountMinor:     1_000,
+		Currency:        "GHS",
+		TransferID:      "tx_" + uuid.NewString(),
+		IdempotencyKey:  "idem_" + uuid.NewString(),
+	})
+
+	st.SetAuthorisationKey(nil)
+	if _, err := st.CaptureTransfer(ctx, req); !errors.Is(err, ErrGrantNotVerifiable) {
+		t.Fatalf("expected ErrGrantNotVerifiable, got %v", err)
+	}
+	if got := balanceOf(t, st, from); got != 100_000 {
+		t.Fatalf("balance moved: %d", got)
+	}
+}
+
+// The authorisation method travels with the grant into evidence, so a sandbox
+// authorisation can never be mistaken for a verified passkey downstream.
+func TestEvidenceRecordsTheAuthorisationMethod(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	from := openWallet(t, st, "GHS", 50_000)
+	to := openWallet(t, st, "GHS", 0)
+	req := authorised(t, TransferRequest{
+		FromExternalRef: from,
+		ToExternalRef:   to,
+		AmountMinor:     2_500,
+		Currency:        "GHS",
+		TransferID:      "tx_" + uuid.NewString(),
+		IdempotencyKey:  "idem_" + uuid.NewString(),
+	})
+	if _, err := st.CaptureTransfer(ctx, req); err != nil {
+		t.Fatalf("transfer: %v", err)
+	}
+
+	var method string
+	var jti *string
+	if err := st.pool.QueryRow(ctx, `
+		SELECT method, grant_jti FROM authorisation_evidence WHERE transfer_id = $1
+	`, req.TransferID).Scan(&method, &jti); err != nil {
+		t.Fatalf("read evidence: %v", err)
+	}
+	if method != string(authgrant.MethodSandboxAuthenticator) {
+		t.Fatalf("evidence claims method %q; the grant said %q",
+			method, authgrant.MethodSandboxAuthenticator)
+	}
+	if jti == nil || *jti == "" {
+		t.Fatal("evidence does not reference the grant that authorised it")
 	}
 }

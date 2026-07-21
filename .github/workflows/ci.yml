@@ -106,6 +106,33 @@ jobs:
         working-directory: services/ledger
         run: go test ./...
 
+  authgrant:
+    name: authorisation grants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Tests
+        working-directory: services/authgrant
+        run: go test ./...
+
+  identity-access:
+    name: identity-access
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Build
+        working-directory: services/identity-access
+        run: go build ./...
+      - name: Vet
+        working-directory: services/identity-access
+        run: go vet ./...
+
   payments:
     name: payments
     runs-on: ubuntu-latest

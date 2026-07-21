@@ -15,6 +15,7 @@
 | Payments API | **8090** |
 | Voice-intent API | **8091** |
 | Ledger API | **8092** |
+| identity-access | **8093** |
 | Merchant web (dev) | 3005 |
 | Consumer PWA (dev) | 3006 |
 | Super Admin console (dev) | **3007** |
@@ -71,6 +72,7 @@ npm run db:migrate
 npm run dev:ledger            # :8092 authoritative balances
 npm run dev:payments-worker
 npm run dev:payments-api      # :8090
+npm run dev:identity          # :8093 mints authorisation grants
 npm run dev:voice-intent      # :8091
 ```
 
@@ -112,3 +114,25 @@ npx expo start --lan
 ## Money safety
 
 Local adapters are simulations only. No live rails, no production keys.
+
+## Sending money in the sandbox
+
+Money movement takes three steps, and the ledger enforces the order (ADR 0002):
+
+1. `POST :8090/v1/transfers/prepare` — fixes the transfer id, recipient account
+   and fee. Nothing is reserved.
+2. `POST :8093/v1/grants` — mints an authorisation grant bound to exactly those
+   values. Only identity-access holds the signing key.
+3. `POST :8090/v1/transfers` — submits the prepared transfer with the grant.
+
+The ledger verifies the signature, the validity window and the binding, and
+consumes the grant so it cannot be used twice. Start the ledger with
+`LEDGER_AUTH_PUBLIC_KEY` set to the key printed by identity-access at startup
+(or read it from `GET :8093/v1/keys`); without it the ledger refuses every
+transfer rather than falling back to accepting an unverified string.
+
+**Grants are currently minted without any authenticator challenge.** They are
+labelled `sandbox_authenticator` in the grant, in the ledger's grant table and
+in authorisation evidence. That label is the honest statement of what the
+sandbox proves, which is that the transaction was bound and not replayed --
+not that a human approved it. Passkey verification is G2-B.

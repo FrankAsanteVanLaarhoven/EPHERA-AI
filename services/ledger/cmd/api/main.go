@@ -27,6 +27,23 @@ func main() {
 	}
 	defer st.Close()
 
+	// Authorisation grants are verified against the identity service's public
+	// key (ADR 0002). Without it the ledger cannot distinguish a real grant
+	// from a forged one, so it refuses every transfer rather than falling back
+	// to accepting an unverified string.
+	pubHex := os.Getenv("LEDGER_AUTH_PUBLIC_KEY")
+	if pubHex == "" {
+		log.Printf("WARNING: LEDGER_AUTH_PUBLIC_KEY is not set. " +
+			"Transfers will be refused until an authorisation public key is configured.")
+	} else {
+		pub, err := store.ParseAuthorisationKey(pubHex)
+		if err != nil {
+			log.Fatalf("authorisation key: %v", err)
+		}
+		st.SetAuthorisationKey(pub)
+		log.Printf("authorisation grants verified against key %s...", pubHex[:16])
+	}
+
 	s := &server{st: st}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
@@ -184,8 +201,21 @@ func writeStoreErr(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "insufficient_funds"})
 	case errors.Is(err, store.ErrFrozen):
 		writeJSON(w, http.StatusLocked, map[string]string{"error": "account_frozen"})
+	case errors.Is(err, store.ErrGrantAlreadyUsed):
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":   "authorisation_grant_already_used",
+			"message": "This authorisation grant has already been used. Grants are single use.",
+		})
+	case errors.Is(err, store.ErrGrantNotVerifiable):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error":   "authorisation_unverifiable",
+			"message": "No authorisation public key is configured; the ledger cannot verify grants.",
+		})
 	case errors.Is(err, store.ErrUnauthorised):
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authorisation_required"})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error":   "authorisation_required",
+			"message": err.Error(),
+		})
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}

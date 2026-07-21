@@ -42,13 +42,13 @@ func DomesticTransferSim(ctx workflow.Context, in DomesticTransferInput) (Domest
 		return DomesticTransferResult{}, err
 	}
 
-	if err := workflow.ExecuteActivity(ctx, acts.RequireAuthorisation, in.AuthorisationRef).Get(ctx, nil); err != nil {
+	if err := workflow.ExecuteActivity(ctx, acts.RequireAuthorisation, in).Get(ctx, nil); err != nil {
 		logger.Error("authorisation failed", "error", err)
 		return DomesticTransferResult{TransferID: in.TransferID, Status: "denied", Message: err.Error()}, err
 	}
 
 	var holdID string
-	if err := workflow.ExecuteActivity(ctx, acts.PostLedgerHold, in.FromExternalRef, in.TransferID, in.IdempotencyKey, in.AmountMinor+q.FeeMinor, in.Currency).Get(ctx, &holdID); err != nil {
+	if err := workflow.ExecuteActivity(ctx, acts.PostLedgerHold, in.FromExternalRef, in.TransferID, in.IdempotencyKey, in.AmountMinor+in.FeeMinor, in.Currency).Get(ctx, &holdID); err != nil {
 		return DomesticTransferResult{TransferID: in.TransferID, Status: "failed", Message: err.Error()}, err
 	}
 
@@ -68,7 +68,7 @@ func DomesticTransferSim(ctx workflow.Context, in DomesticTransferInput) (Domest
 			Status:       "failed",
 			ExecutionID:  exec.ExecutionID,
 			ProviderRef:  exec.ProviderRef,
-			FeeMinor:     q.FeeMinor,
+			FeeMinor:     in.FeeMinor,
 			RouteSummary: q.RouteSummary,
 			ReceiptID:    rec.ID,
 			Message:      exec.Message,
@@ -76,12 +76,12 @@ func DomesticTransferSim(ctx workflow.Context, in DomesticTransferInput) (Domest
 	}
 
 	var journalID string
-	if err := workflow.ExecuteActivity(ctx, acts.CaptureLedger, in, holdID, q.FeeMinor).Get(ctx, &journalID); err != nil {
+	if err := workflow.ExecuteActivity(ctx, acts.CaptureLedger, in, holdID, in.FeeMinor).Get(ctx, &journalID); err != nil {
 		return DomesticTransferResult{TransferID: in.TransferID, Status: "failed", Message: err.Error()}, err
 	}
 
 	summary := fmt.Sprintf("Sent %d %s minor units to %s via %s. Fee %d. Journal %s. %s",
-		in.AmountMinor, in.Currency, in.RecipientName, in.Rail, q.FeeMinor, journalID, q.ETA)
+		in.AmountMinor, in.Currency, in.RecipientName, in.Rail, in.FeeMinor, journalID, q.ETA)
 	var rec Receipt
 	if err := workflow.ExecuteActivity(ctx, acts.CreateReceipt, in.TransferID, "settled", exec.ProviderRef, in.AuthorisationRef, summary).Get(ctx, &rec); err != nil {
 		return DomesticTransferResult{}, err
@@ -92,7 +92,7 @@ func DomesticTransferSim(ctx workflow.Context, in DomesticTransferInput) (Domest
 		Status:         "settled",
 		ExecutionID:    exec.ExecutionID,
 		ProviderRef:    exec.ProviderRef,
-		FeeMinor:       q.FeeMinor,
+		FeeMinor:       in.FeeMinor,
 		RouteSummary:   q.RouteSummary,
 		ReceiptID:      rec.ID,
 		JournalEntryID: journalID,
@@ -109,7 +109,7 @@ func AirtimePurchaseSim(ctx workflow.Context, in AirtimeInput) (DomesticTransfer
 	ctx = workflow.WithActivityOptions(ctx, ao)
 	var acts *Activities
 
-	if err := workflow.ExecuteActivity(ctx, acts.RequireAuthorisation, in.AuthorisationRef).Get(ctx, nil); err != nil {
+	if err := workflow.ExecuteActivity(ctx, acts.RequireGrantPresent, in.AuthorisationRef).Get(ctx, nil); err != nil {
 		return DomesticTransferResult{TransferID: in.TransferID, Status: "denied", Message: err.Error()}, err
 	}
 
