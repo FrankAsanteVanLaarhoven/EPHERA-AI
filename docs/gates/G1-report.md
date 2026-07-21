@@ -112,7 +112,17 @@ the run rather than silently diverging from what is deployed.
 | `npm run test` for validation, passkeys, offline-queue | ok |
 
 Every job in the new continuous integration file corresponds to a command that
-was run locally first. None of it is aspirational.
+was run locally first.
+
+**Correction, added after the first hosted run.** That claim was not quite true.
+The applications job contained one line — `npm run build --workspaces
+--if-present` — that had not been run locally; packages had been built
+individually, in dependency order. On the hosted runner npm chose its own order,
+built `payment-sdk` before `validation` had emitted types, and built the
+applications before any package was ready. Both failed. Fixed by building
+packages in explicit dependency order, verified from a clean tree, and green on
+the runner. The lesson is the gate's own: a command that has not been run is not
+evidence, however reasonable it looks.
 
 ### Verification after the fix
 
