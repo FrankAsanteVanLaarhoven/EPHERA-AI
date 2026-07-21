@@ -1,4 +1,7 @@
-/** EPHERA visual system — matched to product UI benchmark mockups. */
+/**
+ * Local theme mirror of the design-token package so Metro never
+ * ships a stale linked-package export into the app.
+ */
 export const colors = {
   bg: "#050B18",
   bgDeep: "#02060F",
@@ -49,21 +52,4 @@ export const typography = {
   body: 15,
   caption: 12,
   micro: 11,
-} as const;
-
-export const shadows = {
-  orb: {
-    shadowColor: "#3B82F6",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
-    shadowRadius: 28,
-    elevation: 12,
-  },
-  card: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-    elevation: 6,
-  },
 } as const;

@@ -1,16 +1,17 @@
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
-import { colors, space } from "@ephera/design-tokens";
 import { createPasskeyModule } from "@ephera/passkeys";
+import { GlassCard, PrimaryButton, Screen } from "../components/ui";
+import { colors, space, typography } from "../theme";
 import { PAYMENTS_URL } from "../lib/config";
-import type { Screen } from "../App";
+import type { Screen as Route } from "../App";
 
 const passkeys = createPasskeyModule({ allowMock: true });
 
 export default function FreezeScreen({
   back,
 }: {
-  go: (screen: Screen, params?: Record<string, string>) => void;
+  go: (screen: Route, params?: Record<string, string>) => void;
   back: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -54,40 +55,55 @@ export default function FreezeScreen({
   }
 
   return (
-    <View style={styles.container}>
+    <Screen>
       <Pressable onPress={back}>
         <Text style={styles.back}>← Back</Text>
       </Pressable>
       <Text style={styles.kicker}>SECURITY</Text>
       <Text style={styles.title}>Freeze wallet</Text>
       <Text style={styles.body}>
-        Immediately blocks outbound transfers from this wallet. Passkey required. Voice alone cannot
-        freeze or unfreeze.
+        Immediately blocks outbound transfers. Passkey required — voice alone cannot freeze or
+        unfreeze.
       </Text>
-      <Pressable style={[styles.btn, busy && styles.disabled]} disabled={busy} onPress={() => void freeze()}>
-        {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Freeze with passkey</Text>}
-      </Pressable>
+
+      <GlassCard style={{ marginTop: space.lg }}>
+        <Text style={styles.cardTitle}>What happens next</Text>
+        <Text style={styles.bullet}>• Outbound payments blocked</Text>
+        <Text style={styles.bullet}>• Inbound transfers still credit</Text>
+        <Text style={styles.bullet}>• Unfreeze requires stronger step-up</Text>
+      </GlassCard>
+
+      <View style={{ marginTop: "auto", gap: 10 }}>
+        <PrimaryButton
+          label={busy ? "Freezing…" : "Freeze with passkey"}
+          variant="danger"
+          onPress={() => void freeze()}
+          disabled={busy}
+        />
+        <PrimaryButton label="Cancel" variant="ghost" onPress={back} />
+      </View>
+      {busy ? <ActivityIndicator color={colors.danger} style={{ marginTop: 12 }} /> : null}
       {status ? <Text style={styles.status}>{status}</Text> : null}
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg, padding: space.lg, paddingTop: 56 },
-  back: { color: colors.accent, marginBottom: space.md, fontWeight: "600" },
-  kicker: { color: colors.danger, fontWeight: "700" },
-  title: { color: colors.text, fontSize: 28, fontWeight: "700", marginTop: 8 },
-  body: { color: colors.textMuted, marginTop: space.sm, lineHeight: 20 },
-  btn: {
-    marginTop: space.xl,
-    backgroundColor: colors.danger,
-    borderRadius: 999,
-    padding: 14,
-    alignItems: "center",
-    minHeight: 48,
-    justifyContent: "center",
+  back: { color: colors.accentBright, fontWeight: "600", marginBottom: space.sm },
+  kicker: {
+    color: colors.danger,
+    fontWeight: "700",
+    fontSize: typography.micro,
+    letterSpacing: 1.2,
   },
-  disabled: { opacity: 0.5 },
-  btnText: { color: "#fff", fontWeight: "700" },
-  status: { color: colors.text, marginTop: space.lg, lineHeight: 22 },
+  title: {
+    color: colors.text,
+    fontSize: typography.title,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  body: { color: colors.textMuted, marginTop: 8, lineHeight: 21 },
+  cardTitle: { color: colors.text, fontWeight: "700", marginBottom: 10 },
+  bullet: { color: colors.textMuted, marginBottom: 6, lineHeight: 20 },
+  status: { color: colors.text, marginTop: space.md, lineHeight: 22 },
 });

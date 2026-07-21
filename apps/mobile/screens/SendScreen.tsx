@@ -8,16 +8,18 @@ import {
 } from "react-native";
 import type { PaymentIntent } from "@ephera/intent-schema";
 import { validatePaymentIntent } from "@ephera/validation";
-import { colors, space } from "@ephera/design-tokens";
 import { createPasskeyModule } from "@ephera/passkeys";
 import { OfflineQueue, MemoryStorage } from "@ephera/offline-queue";
+import { GlassCard, PrimaryButton, Screen } from "../components/ui";
+import { colors, space, typography } from "../theme";
 import { PAYMENTS_URL } from "../lib/config";
-import type { Screen } from "../App";
+import type { Screen as Route } from "../App";
 
 const passkeys = createPasskeyModule({ allowMock: true });
 const offlineQueue = new OfflineQueue(new MemoryStorage());
 
 function formatMoney(minor: number, currency: string) {
+  if (currency === "GHS") return `GH₵ ${(minor / 100).toFixed(2)}`;
   return `${currency} ${(minor / 100).toFixed(2)}`;
 }
 
@@ -25,7 +27,7 @@ export default function SendScreen({
   back,
   params,
 }: {
-  go: (screen: Screen, params?: Record<string, string>) => void;
+  go: (screen: Route, params?: Record<string, string>) => void;
   back: () => void;
   params?: Record<string, string>;
 }) {
@@ -34,7 +36,7 @@ export default function SendScreen({
       try {
         return JSON.parse(params.intentJson) as PaymentIntent;
       } catch {
-        /* fall through */
+        /* fallthrough */
       }
     }
     return {
@@ -42,21 +44,21 @@ export default function SendScreen({
       name: "send_money",
       language: "en",
       confidence: 0.92,
-      amount: { amountMinor: 5000, currency: "GHS" },
+      amount: { amountMinor: 10000, currency: "GHS" },
       recipient: {
         displayName: "Ama Mensah",
         accountHint: "wallet ending 4281",
         verified: true,
         isNew: false,
       },
-      rawUtterance: "Send 50 cedis to Ama",
+      rawUtterance: "Send 100 cedis to Ama",
       createdAt: new Date().toISOString(),
     };
   }, [params?.intentJson]);
 
   const issues = validatePaymentIntent(intent);
   const [feeMinor, setFeeMinor] = useState(0);
-  const [route, setRoute] = useState("EPHERA sandbox → mobile money sim");
+  const [route, setRoute] = useState("EPHERA → mobile money");
   const [eta, setEta] = useState("Under 2 minutes");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -70,11 +72,7 @@ export default function SendScreen({
         const res = await fetch(`${PAYMENTS_URL}/v1/quotes`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            amountMinor: amount,
-            currency,
-            rail: "mobile-money-sim",
-          }),
+          body: JSON.stringify({ amountMinor: amount, currency, rail: "mobile-money-sim" }),
         });
         if (res.ok) {
           const q = await res.json();
@@ -83,7 +81,7 @@ export default function SendScreen({
           setEta(q.eta ?? eta);
         }
       } catch {
-        /* offline quote fallback */
+        /* keep defaults */
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -107,7 +105,6 @@ export default function SendScreen({
         setStatus(`Authorisation failed: ${auth.error}`);
         return;
       }
-
       const body = {
         amountMinor: intent.amount.amountMinor,
         currency: intent.amount.currency,
@@ -115,9 +112,8 @@ export default function SendScreen({
         recipientHint: intent.recipient.accountHint,
         rail: "mobile-money-sim",
         authorisationRef: auth.authorisationRef,
-        idempotencyKey: `idem_${intent.id}_${intent.amount.amountMinor}_${Date.now()}`,
+        idempotencyKey: `idem_${intent.id}_${Date.now()}`,
       };
-
       try {
         const res = await fetch(`${PAYMENTS_URL}/v1/transfers`, {
           method: "POST",
@@ -125,10 +121,6 @@ export default function SendScreen({
           body: JSON.stringify(body),
         });
         const data = await res.json();
-        if (res.status === 401 || data.error === "authorisation_required") {
-          setStatus("Server rejected: authorisation required (voice is never enough).");
-          return;
-        }
         if (!res.ok && data.status !== "settled") {
           offlineQueue.enqueue({
             id: transferId,
@@ -136,19 +128,16 @@ export default function SendScreen({
             payload: body,
             authorisationRef: auth.authorisationRef,
           });
-          setStatus(
-            `Could not complete online (${data.error ?? res.status}). Queued offline as pending.`,
-          );
+          setStatus(data.error ?? "Queued offline as pending.");
           return;
         }
-        setStatus(`Status: ${data.status}`);
+        setStatus(`✓ ${data.status}`);
         setReceipt(
           [
-            `Transfer ${data.transferId}`,
-            `Journal ${data.journalEntryId ?? "—"}`,
-            `Receipt ${data.receiptId ?? "—"}`,
-            data.routeSummary ?? route,
-            data.message ?? "",
+            data.transferId && `Transfer ${data.transferId}`,
+            data.journalEntryId && `Journal ${data.journalEntryId}`,
+            data.receiptId && `Receipt ${data.receiptId}`,
+            data.message,
           ]
             .filter(Boolean)
             .join("\n"),
@@ -160,7 +149,7 @@ export default function SendScreen({
           payload: body,
           authorisationRef: auth.authorisationRef,
         });
-        setStatus("Network unavailable. Authorised transfer queued offline (pending).");
+        setStatus("Network unavailable — authorised transfer queued offline.");
       }
     } finally {
       setBusy(false);
@@ -172,96 +161,99 @@ export default function SendScreen({
     : "—";
 
   return (
-    <View style={styles.container}>
-      <Pressable onPress={back}>
+    <Screen>
+      <Pressable onPress={back} style={styles.backRow}>
         <Text style={styles.back}>← Back</Text>
       </Pressable>
       <Text style={styles.kicker}>SEND MONEY</Text>
-      <View style={styles.card}>
+      <Text style={styles.title}>Confirm transfer</Text>
+      <Text style={styles.sub}>
+        Review recipient, cost and consequence — then authorise with passkey.
+      </Text>
+
+      <GlassCard style={{ marginTop: space.lg }}>
         <Text style={styles.label}>Recipient</Text>
         <Text style={styles.value}>
           {intent.recipient?.displayName ?? "Unknown"}
-          {intent.recipient?.verified ? " · verified" : ""}
+          {intent.recipient?.verified ? "  · verified" : ""}
         </Text>
         {intent.recipient?.accountHint ? (
           <Text style={styles.muted}>{intent.recipient.accountHint}</Text>
         ) : null}
 
         <Text style={[styles.label, styles.mt]}>You send</Text>
-        <Text style={styles.value}>{amountLabel}</Text>
+        <Text style={styles.amount}>{amountLabel}</Text>
 
-        <Text style={[styles.label, styles.mt]}>Fee</Text>
-        <Text style={styles.value}>
-          {formatMoney(feeMinor, intent.amount?.currency ?? "GHS")}
-        </Text>
+        <View style={styles.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.label}>Fee</Text>
+            <Text style={styles.valueSm}>
+              {formatMoney(feeMinor, intent.amount?.currency ?? "GHS")}
+            </Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.label}>ETA</Text>
+            <Text style={styles.valueSm}>{eta}</Text>
+          </View>
+        </View>
 
         <Text style={[styles.label, styles.mt]}>Route</Text>
         <Text style={styles.muted}>{route}</Text>
-        <Text style={styles.muted}>{eta}</Text>
-      </View>
+      </GlassCard>
 
       {issues.length > 0 ? (
         <Text style={styles.warn}>Validation: {issues.map((i) => i.code).join(", ")}</Text>
       ) : (
-        <Text style={styles.ok}>Intent validation passed · passkey required</Text>
+        <Text style={styles.ok}>Voice proposed · passkey required to release funds</Text>
       )}
 
-      <Text style={styles.rule}>
-        Voice proposed this transfer. Money moves only after passkey + policy + verification.
-      </Text>
+      <View style={{ marginTop: "auto", gap: 10 }}>
+        <PrimaryButton
+          label={busy ? "Authorising…" : "Authorise with passkey"}
+          onPress={() => void authoriseAndSend()}
+          disabled={issues.length > 0 || busy}
+        />
+        <PrimaryButton label="Cancel" variant="ghost" onPress={back} />
+      </View>
 
-      <Pressable
-        style={[styles.btn, (issues.length > 0 || busy) && styles.btnDisabled]}
-        disabled={issues.length > 0 || busy}
-        onPress={() => void authoriseAndSend()}
-      >
-        {busy ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.btnText}>Authorise with passkey</Text>
-        )}
-      </Pressable>
-
+      {busy ? <ActivityIndicator color={colors.accent} style={{ marginTop: 12 }} /> : null}
       {status ? <Text style={styles.status}>{status}</Text> : null}
       {receipt ? <Text style={styles.receipt}>{receipt}</Text> : null}
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg, padding: space.lg, paddingTop: 56 },
-  back: { color: colors.accent, marginBottom: space.md, fontWeight: "600" },
-  kicker: { color: colors.accent, fontWeight: "700", marginBottom: space.sm },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    borderColor: colors.border,
-    borderWidth: 1,
-    padding: space.md,
+  backRow: { marginBottom: space.sm },
+  back: { color: colors.accentBright, fontWeight: "600" },
+  kicker: {
+    color: colors.cyan,
+    fontWeight: "700",
+    fontSize: typography.micro,
+    letterSpacing: 1.2,
   },
-  label: { color: colors.textMuted, fontSize: 13 },
-  value: { color: colors.text, fontSize: 20, fontWeight: "700", marginTop: 4 },
-  muted: { color: colors.textMuted, marginTop: 4 },
+  title: {
+    color: colors.text,
+    fontSize: typography.title,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  sub: { color: colors.textMuted, marginTop: 6, lineHeight: 20 },
+  label: { color: colors.textDim, fontSize: 12, marginBottom: 4 },
+  value: { color: colors.text, fontSize: 18, fontWeight: "700" },
+  valueSm: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  amount: { color: colors.text, fontSize: 32, fontWeight: "700", marginBottom: 8 },
+  muted: { color: colors.textMuted, marginTop: 2, fontSize: 13 },
   mt: { marginTop: space.md },
+  row: { flexDirection: "row", gap: 16, marginTop: space.md },
   warn: { color: colors.warning, marginTop: space.md },
-  ok: { color: colors.success, marginTop: space.md },
-  rule: { color: colors.textMuted, marginTop: space.md, lineHeight: 20 },
-  btn: {
-    marginTop: space.lg,
-    backgroundColor: colors.accent,
-    borderRadius: 999,
-    padding: 14,
-    alignItems: "center",
-    minHeight: 48,
-    justifyContent: "center",
-  },
-  btnDisabled: { opacity: 0.4 },
-  btnText: { color: "#fff", fontWeight: "700" },
+  ok: { color: colors.success, marginTop: space.md, fontSize: 13 },
   status: { color: colors.text, marginTop: space.md, lineHeight: 20 },
   receipt: {
     color: colors.textMuted,
-    marginTop: space.sm,
-    lineHeight: 20,
+    marginTop: 8,
     fontFamily: "Courier",
+    fontSize: 12,
+    lineHeight: 18,
   },
 });
