@@ -1,5 +1,9 @@
 # EPHERA Money
 
+[![CI](https://github.com/FrankAsanteVanLaarhoven/EPHERA-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/FrankAsanteVanLaarhoven/EPHERA-AI/actions/workflows/ci.yml)
+
+**Repository:** [github.com/FrankAsanteVanLaarhoven/EPHERA-AI](https://github.com/FrankAsanteVanLaarhoven/EPHERA-AI)
+
 **Voice-native mobile money, banking and commerce infrastructure for Africa and underserved markets.**
 
 > People should not have to understand banking applications, payment rails or menu structures. They should state what they need, see the exact cost and consequence, approve it securely, and receive proof that it happened.
