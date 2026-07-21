@@ -4,25 +4,16 @@ import { PrimaryButton, Screen } from "../components/ui";
 import { colors, space, typography } from "../theme";
 import type { Screen as Route } from "../App";
 
-const POINTS = [
-  "Hands-free",
-  "Faster",
-  "Smarter",
-  "100% Secure",
-];
+const POINTS = ["Hands-free", "Faster", "Smarter", "100% Secure"];
 
-export default function VoiceModeScreen({
-  go,
-}: {
-  go: (screen: Route) => void;
-}) {
+export default function VoiceModeScreen({ go }: { go: (screen: Route) => void }) {
   return (
     <Screen style={styles.root}>
       <Text style={styles.title}>Ephera Voice Mode</Text>
       <Text style={styles.info}>ⓘ</Text>
 
       <View style={styles.orbWrap}>
-        <VoiceOrb size={180} listening mark="Ξ" />
+        <VoiceOrb size={186} listening mark="ephera" />
       </View>
 
       <Text style={styles.lead}>
@@ -32,7 +23,9 @@ export default function VoiceModeScreen({
       <View style={styles.list}>
         {POINTS.map((p) => (
           <View key={p} style={styles.row}>
-            <Text style={styles.check}>✓</Text>
+            <View style={styles.checkCircle}>
+              <Text style={styles.check}>✓</Text>
+            </View>
             <Text style={styles.point}>{p}</Text>
           </View>
         ))}
@@ -53,7 +46,7 @@ const styles = StyleSheet.create({
   root: { alignItems: "center" },
   title: {
     color: colors.text,
-    fontSize: typography.subtitle,
+    fontSize: 20,
     fontWeight: "700",
     alignSelf: "center",
   },
@@ -64,26 +57,29 @@ const styles = StyleSheet.create({
     color: colors.textDim,
     fontSize: 18,
   },
-  orbWrap: { marginTop: space.xxl, marginBottom: space.xl },
+  orbWrap: { marginTop: 48, marginBottom: 28 },
   lead: {
     color: colors.text,
-    fontSize: typography.body,
-    textAlign: "center",
-    lineHeight: 22,
-    marginBottom: space.xl,
-  },
-  list: { alignSelf: "stretch", paddingHorizontal: space.xl, gap: 14 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  check: {
-    color: colors.success,
     fontSize: 16,
-    fontWeight: "700",
-    width: 22,
+    textAlign: "center",
+    lineHeight: 24,
+    marginBottom: 32,
   },
-  point: { color: colors.text, fontSize: typography.body, fontWeight: "600" },
+  list: { alignSelf: "stretch", paddingHorizontal: 36, gap: 16 },
+  row: { flexDirection: "row", alignItems: "center", gap: 14 },
+  checkCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "rgba(52,211,153,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  check: { color: colors.success, fontSize: 13, fontWeight: "800" },
+  point: { color: colors.text, fontSize: 16, fontWeight: "600" },
   bottom: {
     marginTop: "auto",
     alignSelf: "stretch",
-    paddingBottom: space.sm,
+    paddingBottom: 4,
   },
 });

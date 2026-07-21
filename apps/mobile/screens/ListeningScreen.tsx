@@ -31,17 +31,20 @@ export default function ListeningScreen({
 
       <View style={styles.center}>
         <Text style={styles.listening}>Listening…</Text>
-        <VoiceOrb size={176} listening />
+        <VoiceOrb size={178} listening mark="bars" />
         <Text style={styles.imListening}>I’m listening</Text>
         <Text style={styles.help}>How can I help?</Text>
       </View>
 
       <Text style={styles.try}>Try saying…</Text>
-      <GlassCard style={{ paddingVertical: 8 }}>
-        {SUGGESTIONS.map((s) => (
+      <GlassCard style={{ paddingVertical: 4, paddingHorizontal: 8 }}>
+        {SUGGESTIONS.map((s, idx) => (
           <Pressable
             key={s.label}
-            style={styles.row}
+            style={[
+              styles.row,
+              idx === SUGGESTIONS.length - 1 && { borderBottomWidth: 0 },
+            ]}
             onPress={() => {
               if (s.action === "send") {
                 go("send", {
@@ -72,7 +75,9 @@ export default function ListeningScreen({
       </GlassCard>
 
       <View style={styles.footer}>
-        <Text style={styles.footerText}>◆ Voice is powered by Ephera AI</Text>
+        <View style={styles.footerPill}>
+          <Text style={styles.footerText}>◆  Voice is powered by Ephera AI</Text>
+        </View>
       </View>
     </Screen>
   );
@@ -82,65 +87,68 @@ const styles = StyleSheet.create({
   top: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: space.md,
+    marginBottom: space.sm,
   },
   iconBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: "rgba(18,29,50,0.9)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderColor: colors.border,
   },
-  iconBtnText: { color: colors.textMuted, fontSize: 16 },
-  center: { alignItems: "center", marginTop: space.md, marginBottom: space.lg },
+  iconBtnText: { color: colors.textMuted, fontSize: 15 },
+  center: { alignItems: "center", marginTop: 8, marginBottom: space.md },
   listening: {
     color: colors.cyan,
-    fontSize: typography.caption,
-    fontWeight: "600",
-    marginBottom: space.md,
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 8,
   },
   imListening: {
-    marginTop: space.lg,
+    marginTop: 10,
     color: colors.text,
-    fontSize: typography.subtitle,
+    fontSize: 22,
     fontWeight: "700",
   },
   help: {
     marginTop: 4,
     color: colors.textMuted,
-    fontSize: typography.body,
+    fontSize: 15,
   },
   try: {
     color: colors.textDim,
-    fontSize: typography.caption,
-    marginBottom: space.sm,
+    fontSize: 12,
+    marginBottom: 8,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 14,
-    paddingHorizontal: 4,
+    paddingHorizontal: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  rowIcon: { width: 28, fontSize: 16 },
-  rowLabel: { flex: 1, color: colors.text, fontSize: typography.body },
+  rowIcon: { width: 28, fontSize: 15 },
+  rowLabel: { flex: 1, color: colors.text, fontSize: 15 },
   rowChevron: { color: colors.textDim, fontSize: 20 },
   footer: {
     marginTop: "auto",
     alignItems: "center",
     paddingTop: space.md,
   },
+  footerPill: {
+    backgroundColor: "rgba(8,15,30,0.9)",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   footerText: {
     color: colors.textDim,
-    fontSize: typography.micro,
-    backgroundColor: colors.chip,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: radii.pill,
-    overflow: "hidden",
+    fontSize: 11,
   },
 });

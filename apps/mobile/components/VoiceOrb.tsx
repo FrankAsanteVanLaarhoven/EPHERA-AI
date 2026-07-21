@@ -1,105 +1,173 @@
 import { StyleSheet, Text, View, type ViewStyle } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { colors } from "../theme";
 
 type Props = {
   size?: number;
   listening?: boolean;
-  mark?: string;
+  /** Brand monogram — mockup uses stacked-E mark */
+  mark?: "ephera" | "bars";
   style?: ViewStyle;
+  showWaves?: boolean;
 };
 
-const orbShadow = {
-  shadowColor: "#3B82F6",
-  shadowOffset: { width: 0, height: 0 },
-  shadowOpacity: 0.55,
-  shadowRadius: 28,
-  elevation: 12,
-};
-
-/** Signature EPHERA voice orb — blue/cyan glow with brand mark. */
-export function VoiceOrb({ size = 148, listening = false, mark = "Ξ", style }: Props) {
-  const outer = size;
-  const mid = size * 0.78;
-  const core = size * 0.52;
-
+/** Premium multi-ring EPHERA orb matching product benchmark UI. */
+export function VoiceOrb({
+  size = 160,
+  listening = false,
+  mark = "ephera",
+  style,
+  showWaves = true,
+}: Props) {
+  const s = size;
   return (
-    <View style={[styles.wrap, { width: outer, height: outer }, style]}>
-      <View
+    <View style={[{ width: s * 1.55, height: s * 1.2, alignItems: "center", justifyContent: "center" }, style]}>
+      {/* Horizontal sound waves */}
+      {showWaves ? (
+        <>
+          <View style={[styles.wave, { width: s * 1.45, height: s * 0.55, opacity: listening ? 0.55 : 0.28 }]} />
+          <View style={[styles.wave, { width: s * 1.25, height: s * 0.4, opacity: listening ? 0.4 : 0.18 }]} />
+        </>
+      ) : null}
+
+      {/* Outer glow disc */}
+      <LinearGradient
+        colors={
+          listening
+            ? ["rgba(34,211,238,0.35)", "rgba(59,130,246,0.12)", "transparent"]
+            : ["rgba(59,130,246,0.4)", "rgba(29,78,216,0.15)", "transparent"]
+        }
         style={[
-          styles.ringOuter,
+          styles.glow,
           {
-            width: outer,
-            height: outer,
-            borderRadius: outer / 2,
-            opacity: listening ? 0.95 : 0.75,
+            width: s * 1.15,
+            height: s * 1.15,
+            borderRadius: (s * 1.15) / 2,
           },
-          orbShadow,
         ]}
       />
+
+      {/* Outer ring */}
+      <View
+        style={[
+          styles.ring,
+          {
+            width: s,
+            height: s,
+            borderRadius: s / 2,
+            borderColor: listening ? "rgba(34,211,238,0.65)" : "rgba(96,165,250,0.55)",
+          },
+        ]}
+      />
+
+      {/* Mid ring */}
       <View
         style={[
           styles.ringMid,
           {
-            width: mid,
-            height: mid,
-            borderRadius: mid / 2,
-            borderColor: listening ? colors.cyan : colors.orbRing,
+            width: s * 0.82,
+            height: s * 0.82,
+            borderRadius: (s * 0.82) / 2,
+            borderColor: listening ? "rgba(139,92,246,0.5)" : "rgba(59,130,246,0.35)",
           },
         ]}
       />
-      <View
+
+      {/* Core */}
+      <LinearGradient
+        colors={["#2563EB", "#1D4ED8", "#1E3A8A"]}
+        start={{ x: 0.2, y: 0 }}
+        end={{ x: 0.8, y: 1 }}
         style={[
           styles.core,
           {
-            width: core,
-            height: core,
-            borderRadius: core / 2,
+            width: s * 0.52,
+            height: s * 0.52,
+            borderRadius: (s * 0.52) / 2,
           },
         ]}
       >
-        <Text style={[styles.mark, { fontSize: core * 0.38 }]}>{mark}</Text>
-      </View>
-      {listening ? (
-        <View style={[styles.waveBar, { width: outer * 0.92, bottom: -6 }]} />
-      ) : null}
+        {mark === "bars" ? (
+          <View style={styles.bars}>
+            <View style={[styles.bar, { height: 10 }]} />
+            <View style={[styles.bar, { height: 16 }]} />
+            <View style={[styles.bar, { height: 12 }]} />
+          </View>
+        ) : (
+          <View style={styles.monoWrap}>
+            <Text style={[styles.mono, { fontSize: s * 0.14 }]}>E</Text>
+            <View style={styles.monoLines}>
+              <View style={styles.monoLine} />
+              <View style={styles.monoLine} />
+              <View style={styles.monoLine} />
+            </View>
+          </View>
+        )}
+      </LinearGradient>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  ringOuter: {
+  glow: {
     position: "absolute",
-    backgroundColor: "rgba(29, 78, 216, 0.22)",
-    borderWidth: 1,
-    borderColor: "rgba(56, 189, 248, 0.35)",
+  },
+  ring: {
+    position: "absolute",
+    borderWidth: 1.5,
+    backgroundColor: "rgba(8, 15, 35, 0.35)",
   },
   ringMid: {
     position: "absolute",
-    backgroundColor: "rgba(15, 23, 42, 0.55)",
-    borderWidth: 1.5,
+    borderWidth: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.45)",
   },
   core: {
-    backgroundColor: colors.orbCore,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(147, 197, 253, 0.5)",
+    borderColor: "rgba(191, 219, 254, 0.45)",
+    shadowColor: "#3B82F6",
+    shadowOpacity: 0.7,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 10,
   },
-  mark: {
+  monoWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  mono: {
     color: colors.white,
-    fontWeight: "700",
+    fontWeight: "200",
     letterSpacing: 1,
   },
-  waveBar: {
-    position: "absolute",
-    height: 3,
+  monoLines: {
+    gap: 2.5,
+    justifyContent: "center",
+  },
+  monoLine: {
+    width: 11,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: "rgba(255,255,255,0.92)",
+  },
+  bars: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  bar: {
+    width: 3,
     borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.95)",
+  },
+  wave: {
+    position: "absolute",
+    borderRadius: 999,
+    borderWidth: 1.2,
+    borderColor: "rgba(56, 189, 248, 0.35)",
     backgroundColor: "transparent",
-    borderBottomWidth: 2,
-    borderBottomColor: "rgba(56, 189, 248, 0.45)",
   },
 });

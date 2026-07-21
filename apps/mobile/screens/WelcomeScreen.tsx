@@ -4,33 +4,31 @@ import { Chip, PrimaryButton, Screen } from "../components/ui";
 import { colors, space, typography } from "../theme";
 import type { Screen as Route } from "../App";
 
-export default function WelcomeScreen({
-  go,
-}: {
-  go: (screen: Route) => void;
-}) {
+export default function WelcomeScreen({ go }: { go: (screen: Route) => void }) {
   return (
     <Screen style={styles.root}>
       <View style={styles.topRow}>
         <View style={styles.badge}>
-          <Text style={styles.badgeDot}>◆</Text>
+          <Text style={styles.badgeIcon}>◆</Text>
           <Text style={styles.badgeText}>VOICE FIRST</Text>
         </View>
-        <Text style={styles.lang}>🌐 EN ▾</Text>
+        <Text style={styles.lang}>🌐  EN ▾</Text>
       </View>
 
       <Text style={styles.greeting}>Good morning</Text>
-      <Text style={styles.question}>How can I help you{"\n"}today?</Text>
+      <Text style={styles.question}>
+        How can I help you{"\n"}today?
+      </Text>
 
       <View style={styles.orbWrap}>
-        <VoiceOrb size={168} />
+        <VoiceOrb size={170} mark="bars" />
         <Text style={styles.hint}>Tap to speak or say “Hey Ephera”</Text>
       </View>
 
       <View style={styles.chips}>
-        <Chip icon="🛡" label="Secure  Bank-grade" />
-        <Chip icon="🔒" label="Private  Your data, yours" />
-        <Chip icon="⚡" label="Instant  Real-time" />
+        <Chip icon="🛡" label={"Secure\nBank-grade"} />
+        <Chip icon="🔒" label={"Private\nYour data, yours"} />
+        <Chip icon="⚡" label={"Instant\nReal-time"} />
       </View>
 
       <View style={styles.actions}>
@@ -53,9 +51,7 @@ export default function WelcomeScreen({
 }
 
 const styles = StyleSheet.create({
-  root: {
-    justifyContent: "flex-start",
-  },
+  root: { justifyContent: "flex-start" },
   topRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -66,52 +62,52 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: colors.accentSoft,
+    backgroundColor: "rgba(37,99,235,0.15)",
     borderRadius: 999,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderWidth: 1,
-    borderColor: colors.borderStrong,
+    borderColor: "rgba(96,165,250,0.35)",
   },
-  badgeDot: { color: colors.cyan, fontSize: 10 },
+  badgeIcon: { color: colors.cyan, fontSize: 9 },
   badgeText: {
     color: colors.accentBright,
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.8,
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1,
   },
   lang: { color: colors.textMuted, fontSize: 13 },
   greeting: {
     color: colors.textMuted,
-    fontSize: typography.subtitle,
-    marginTop: space.sm,
+    fontSize: 20,
+    marginTop: 4,
   },
   question: {
     color: colors.text,
-    fontSize: typography.hero,
+    fontSize: 34,
     fontWeight: "700",
     lineHeight: 40,
     marginTop: 4,
   },
   orbWrap: {
     alignItems: "center",
-    marginTop: space.xl,
-    marginBottom: space.lg,
+    marginTop: 28,
+    marginBottom: 18,
   },
   hint: {
-    marginTop: space.md,
+    marginTop: 4,
     color: colors.textDim,
-    fontSize: typography.caption,
+    fontSize: 13,
   },
   chips: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
     justifyContent: "center",
-    marginBottom: space.xl,
+    marginBottom: 20,
   },
   actions: {
     marginTop: "auto",
-    paddingBottom: space.sm,
+    paddingBottom: 4,
   },
 });

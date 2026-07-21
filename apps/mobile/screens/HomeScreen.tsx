@@ -6,18 +6,19 @@ import {
   Text,
   View,
 } from "react-native";
-import { GlassCard, PrimaryButton, Screen, SectionTitle } from "../components/ui";
+import { LinearGradient } from "expo-linear-gradient";
+import { GlassCard, Screen, SectionTitle } from "../components/ui";
 import { colors, radii, space, typography } from "../theme";
 import { PAYMENTS_URL } from "../lib/config";
 import type { Screen as Route } from "../App";
 
 const ACTIONS = [
-  { key: "send", icon: "✈", label: "Send" },
-  { key: "voice", icon: "↓", label: "Receive" },
-  { key: "services", icon: "▣", label: "Pay" },
-  { key: "services", icon: "⌂", label: "Cash out" },
-  { key: "services", icon: "···", label: "More" },
-] as const;
+  { label: "Send", icon: "✈", go: "send" as const },
+  { label: "Receive", icon: "↓", go: "listening" as const },
+  { label: "Pay", icon: "▣", go: "services" as const },
+  { label: "Cash out", icon: "⌂", go: "services" as const },
+  { label: "More", icon: "···", go: "services" as const },
+];
 
 const ACTIVITY = [
   {
@@ -26,7 +27,8 @@ const ACTIVITY = [
     amount: "+ GH₵ 200.00",
     positive: true,
     tag: "Received",
-    icon: "👤",
+    avatar: "A",
+    color: "#3B82F6",
   },
   {
     name: "MTN MoMo Top Up",
@@ -34,7 +36,8 @@ const ACTIVITY = [
     amount: "- GH₵ 50.00",
     positive: false,
     tag: "",
-    icon: "📱",
+    avatar: "M",
+    color: "#FBBF24",
   },
   {
     name: "Electricity Bill",
@@ -42,7 +45,8 @@ const ACTIVITY = [
     amount: "- GH₵ 180.00",
     positive: false,
     tag: "",
-    icon: "💡",
+    avatar: "⚡",
+    color: "#A78BFA",
   },
   {
     name: "Nana Kwame",
@@ -50,7 +54,8 @@ const ACTIVITY = [
     amount: "+ GH₵ 350.00",
     positive: true,
     tag: "Received",
-    icon: "👤",
+    avatar: "N",
+    color: "#34D399",
   },
 ];
 
@@ -59,7 +64,7 @@ export default function HomeScreen({
 }: {
   go: (screen: Route, params?: Record<string, string>) => void;
 }) {
-  const [balance, setBalance] = useState<string>("GH₵ 12,560.80");
+  const [balance, setBalance] = useState("GH₵ 12,560.80");
   const [usd, setUsd] = useState("≈ $1,245.60 USD");
 
   useEffect(() => {
@@ -71,6 +76,7 @@ export default function HomeScreen({
         if (!res.ok) return;
         const data = await res.json();
         const minor = Number(data.balanceMinor ?? data.availableMinor ?? 0);
+        if (!minor) return;
         const ghs = (minor / 100).toLocaleString("en-GH", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
@@ -78,13 +84,13 @@ export default function HomeScreen({
         setBalance(`GH₵ ${ghs}`);
         setUsd(`≈ $${(minor / 100 / 10.08).toFixed(2)} USD`);
       } catch {
-        /* keep mock showcase numbers from design */
+        /* design showcase numbers remain */
       }
     })();
   }, []);
 
   return (
-    <Screen style={{ paddingHorizontal: 0 }}>
+    <Screen edges={false} style={{ paddingTop: 52 }}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
@@ -94,30 +100,36 @@ export default function HomeScreen({
             <Text style={styles.menuIcon}>☰</Text>
           </Pressable>
           <View style={styles.topRight}>
-            <Pressable style={styles.bell}>
+            <Pressable style={styles.iconCircle}>
               <Text>🔔</Text>
             </Pressable>
-            <View style={styles.avatar}>
+            <LinearGradient
+              colors={["#3B82F6", "#8B5CF6"]}
+              style={styles.avatar}
+            >
               <Text style={styles.avatarText}>E</Text>
-            </View>
+            </LinearGradient>
           </View>
         </View>
 
         <View style={styles.pad}>
-          <Text style={styles.totalLabel}>Total balance  👁</Text>
-          <Text style={styles.balance}>{balance}</Text>
-          <Text style={styles.usd}>{usd}</Text>
+          <View style={styles.balanceHeader}>
+            <View>
+              <Text style={styles.totalLabel}>Total balance  👁</Text>
+              <Text style={styles.balance}>{balance}</Text>
+              <Text style={styles.usd}>{usd}</Text>
+            </View>
+            <Pressable style={styles.accountsChip} onPress={() => go("services")}>
+              <Text style={styles.accountsText}>Accounts  ▾</Text>
+            </Pressable>
+          </View>
 
           <View style={styles.actionRow}>
             {ACTIONS.map((a) => (
               <Pressable
                 key={a.label}
                 style={styles.action}
-                onPress={() => {
-                  if (a.label === "Send") go("send");
-                  else if (a.label === "Receive") go("voice");
-                  else go(a.key as Route);
-                }}
+                onPress={() => go(a.go)}
               >
                 <View style={styles.actionCircle}>
                   <Text style={styles.actionIcon}>{a.icon}</Text>
@@ -127,16 +139,20 @@ export default function HomeScreen({
             ))}
           </View>
 
-          <Pressable style={styles.accountsChip} onPress={() => go("services")}>
-            <Text style={styles.accountsText}>Accounts  ▾</Text>
-          </Pressable>
-
           <SectionTitle title="Recent activity" action="See all" />
-          <GlassCard style={{ paddingVertical: 4 }}>
-            {ACTIVITY.map((item) => (
-              <View key={item.name + item.meta} style={styles.txRow}>
-                <View style={styles.txIcon}>
-                  <Text>{item.icon}</Text>
+          <GlassCard style={{ paddingVertical: 2 }}>
+            {ACTIVITY.map((item, i) => (
+              <View
+                key={item.name + item.meta}
+                style={[
+                  styles.txRow,
+                  i === ACTIVITY.length - 1 && { borderBottomWidth: 0 },
+                ]}
+              >
+                <View style={[styles.txIcon, { backgroundColor: `${item.color}33` }]}>
+                  <Text style={{ color: item.color, fontWeight: "700" }}>
+                    {item.avatar}
+                  </Text>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.txName}>{item.name}</Text>
@@ -151,21 +167,23 @@ export default function HomeScreen({
                   >
                     {item.amount}
                   </Text>
-                  {item.tag ? (
-                    <Text style={styles.txTag}>{item.tag}</Text>
-                  ) : null}
+                  {item.tag ? <Text style={styles.txTag}>{item.tag}</Text> : null}
                 </View>
               </View>
             ))}
           </GlassCard>
+
+          <Pressable style={styles.freezeLink} onPress={() => go("freeze")}>
+            <Text style={styles.freezeText}>Freeze wallet  ·  Security</Text>
+          </Pressable>
         </View>
       </ScrollView>
 
       <View style={styles.askBarWrap}>
         <Pressable style={styles.askBar} onPress={() => go("listening")}>
-          <View style={styles.askOrb}>
-            <Text style={{ color: "#fff", fontWeight: "700" }}>Ξ</Text>
-          </View>
+          <LinearGradient colors={["#2563EB", "#7C3AED"]} style={styles.askOrb}>
+            <Text style={styles.askOrbText}>Ξ</Text>
+          </LinearGradient>
           <Text style={styles.askPlaceholder}>Ask Ephera anything…</Text>
           <Text style={styles.mic}>🎙</Text>
         </Pressable>
@@ -175,12 +193,8 @@ export default function HomeScreen({
 }
 
 const styles = StyleSheet.create({
-  scroll: {
-    paddingBottom: 100,
-  },
-  pad: {
-    paddingHorizontal: space.lg,
-  },
+  scroll: { paddingBottom: 110 },
+  pad: { paddingHorizontal: space.lg },
   topBar: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -189,10 +203,10 @@ const styles = StyleSheet.create({
     marginBottom: space.md,
   },
   menuBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.surfaceElevated,
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: "rgba(18,29,50,0.95)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
@@ -200,89 +214,91 @@ const styles = StyleSheet.create({
   },
   menuIcon: { color: colors.text, fontSize: 16 },
   topRight: { flexDirection: "row", alignItems: "center", gap: 10 },
-  bell: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  iconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: "rgba(18,29,50,0.95)",
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.accentSoft,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { color: colors.accentBright, fontWeight: "700" },
+  avatarText: { color: "#fff", fontWeight: "700" },
+  balanceHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: space.lg,
+  },
   totalLabel: {
     color: colors.textMuted,
-    fontSize: typography.caption,
-    marginBottom: 6,
+    fontSize: 13,
+    marginBottom: 8,
   },
   balance: {
     color: colors.text,
     fontSize: 36,
     fontWeight: "700",
-    letterSpacing: -0.5,
+    letterSpacing: -0.8,
   },
   usd: {
     color: colors.textDim,
-    fontSize: typography.caption,
+    fontSize: 13,
     marginTop: 4,
-    marginBottom: space.lg,
   },
+  accountsChip: {
+    backgroundColor: "rgba(18,29,50,0.95)",
+    borderRadius: radii.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginTop: 4,
+  },
+  accountsText: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
   actionRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: space.md,
+    marginBottom: space.xl,
   },
-  action: { alignItems: "center", width: 64 },
+  action: { alignItems: "center", width: 62 },
   actionCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.surfaceElevated,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "rgba(18,29,50,0.95)",
     borderWidth: 1,
-    borderColor: colors.borderStrong,
+    borderColor: "rgba(96,165,250,0.28)",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 6,
+    marginBottom: 8,
   },
   actionIcon: { color: colors.accentBright, fontSize: 18 },
   actionLabel: {
     color: colors.textMuted,
-    fontSize: typography.micro,
+    fontSize: 11,
     fontWeight: "600",
   },
-  accountsChip: {
-    alignSelf: "flex-end",
-    marginBottom: space.lg,
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: radii.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  accountsText: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
   txRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    paddingVertical: 12,
+    paddingVertical: 13,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
   txIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.surfaceElevated,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -290,6 +306,8 @@ const styles = StyleSheet.create({
   txMeta: { color: colors.textDim, fontSize: 11, marginTop: 2 },
   txAmount: { fontWeight: "700", fontSize: 14 },
   txTag: { color: colors.success, fontSize: 10, marginTop: 2 },
+  freezeLink: { marginTop: space.md, alignItems: "center" },
+  freezeText: { color: colors.textDim, fontSize: 12 },
   askBarWrap: {
     position: "absolute",
     left: space.lg,
@@ -299,22 +317,22 @@ const styles = StyleSheet.create({
   askBar: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: "rgba(12, 21, 38, 0.96)",
     borderRadius: radii.pill,
     borderWidth: 1,
-    borderColor: colors.borderStrong,
+    borderColor: "rgba(96,165,250,0.35)",
     paddingVertical: 10,
     paddingHorizontal: 12,
     gap: 10,
   },
   askOrb: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.orbCore,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
   },
+  askOrbText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   askPlaceholder: { flex: 1, color: colors.textDim, fontSize: 14 },
   mic: { fontSize: 16 },
 });

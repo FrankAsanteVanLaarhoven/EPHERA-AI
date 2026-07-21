@@ -7,16 +7,28 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { colors, radii, space, typography } from "../theme";
 
 export function Screen({
   children,
   style,
+  edges = true,
 }: {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
+  edges?: boolean;
 }) {
-  return <View style={[styles.screen, style]}>{children}</View>;
+  return (
+    <View style={[styles.screen, edges && styles.screenPad, style]}>
+      <LinearGradient
+        pointerEvents="none"
+        colors={["rgba(37,99,235,0.12)", "transparent", "transparent"]}
+        style={StyleSheet.absoluteFill}
+      />
+      {children}
+    </View>
+  );
 }
 
 export function GlassCard({
@@ -42,13 +54,28 @@ export function PrimaryButton({
   variant?: "primary" | "secondary" | "ghost" | "danger";
   disabled?: boolean;
 }) {
+  if (variant === "primary") {
+    return (
+      <Pressable disabled={disabled} onPress={onPress} style={disabled && { opacity: 0.45 }}>
+        <LinearGradient
+          colors={["#3B82F6", "#2563EB"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.btn}
+        >
+          {icon ? <Text style={styles.btnIcon}>{icon}</Text> : null}
+          <Text style={styles.btnText}>{label}</Text>
+        </LinearGradient>
+      </Pressable>
+    );
+  }
+
   return (
     <Pressable
       disabled={disabled}
       onPress={onPress}
       style={[
         styles.btn,
-        variant === "primary" && styles.btnPrimary,
         variant === "secondary" && styles.btnSecondary,
         variant === "ghost" && styles.btnGhost,
         variant === "danger" && styles.btnDanger,
@@ -121,19 +148,21 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+  screenPad: {
     paddingHorizontal: space.lg,
     paddingTop: 56,
     paddingBottom: space.lg,
   },
   glass: {
-    backgroundColor: colors.surfaceGlass,
+    backgroundColor: "rgba(12, 21, 38, 0.82)",
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.border,
     padding: space.md,
   },
   btn: {
-    minHeight: 52,
+    minHeight: 54,
     borderRadius: radii.pill,
     alignItems: "center",
     justifyContent: "center",
@@ -141,13 +170,10 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: space.lg,
   },
-  btnPrimary: {
-    backgroundColor: colors.accent,
-  },
   btnSecondary: {
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: "rgba(18, 29, 50, 0.95)",
     borderWidth: 1,
-    borderColor: colors.borderStrong,
+    borderColor: "rgba(96, 165, 250, 0.45)",
   },
   btnGhost: {
     backgroundColor: "transparent",
@@ -167,7 +193,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: colors.chip,
+    backgroundColor: "rgba(8, 15, 30, 0.75)",
     borderRadius: radii.pill,
     borderWidth: 1,
     borderColor: colors.border,
@@ -177,7 +203,7 @@ const styles = StyleSheet.create({
   chipIcon: { fontSize: 12 },
   chipText: {
     color: colors.textMuted,
-    fontSize: typography.micro,
+    fontSize: 10,
     fontWeight: "600",
   },
   sectionRow: {
