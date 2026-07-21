@@ -6,6 +6,7 @@
   "workspaces": [
     "apps/merchant-web",
     "apps/consumer-pwa",
+    "apps/admin-console",
     "packages/*"
   ],
   "overrides": {
@@ -19,6 +20,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "dev:merchant": "npm run dev -w @ephera/merchant-web",
     "dev:consumer-pwa": "npm run dev -w @ephera/consumer-pwa",
+    "dev:admin": "npm run dev -w @ephera/admin-console",
     "mobile:start": "npm run start -w @ephera/mobile",
     "mobile:lan": "npm run start:lan -w @ephera/mobile",
     "mobile:web": "npm run web -w @ephera/mobile",

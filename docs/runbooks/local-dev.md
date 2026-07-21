@@ -17,6 +17,7 @@
 | Ledger API | **8092** |
 | Merchant web (dev) | 3005 |
 | Consumer PWA (dev) | 3006 |
+| Super Admin console (dev) | **3007** |
 
 ## Start infrastructure
 

@@ -55,6 +55,7 @@ Ephemeral UI is how users interact with EPHERA — it is **not** the product’s
 | **EPHERA Connect** | Banks, telcos, partners | APIs, settlement, embedded finance adapters |
 | **EPHERA Voice** | All users | Multilingual intent compilation (not fund release) |
 | **Consumer PWA** | Browser / desktop / phone | Installable web app with logo home-screen icon |
+| **Super Admin Console** | Platform operators | Remote feature control, Temporal/workflow errors, analytics, providers, AI engines, mandates |
 
 ### Capability highlights
 
@@ -142,6 +143,7 @@ Ephemeral UI is how users interact with EPHERA — it is **not** the product’s
 apps/
   mobile/           Full consumer app (Expo SDK 52, RN 0.76)
   consumer-pwa/     Installable Next.js PWA (:3006)
+  admin-console/    Super Admin control plane (:3007)
   merchant-web/     Merchant portal & design board
 packages/           Shared schemas, SDKs, validation, brand, tokens
 services/
@@ -215,9 +217,12 @@ npm run dev:voice-intent      # :8091
 
 # Surfaces
 npm run dev:consumer-pwa      # PWA  → http://localhost:3006
+npm run dev:admin             # Super Admin → http://localhost:3007
 npm run dev:merchant          # Merchant web
 npm run mobile:lan            # Expo on LAN for physical devices
 ```
+
+Super Admin (sandbox password `ephera-super-admin`): workflows/errors, devices & regions, providers (MTN, open banking, utilities), feature flags, AI model control, direct debit / standing orders. See [`docs/product/ADMIN-CONSOLE.md`](docs/product/ADMIN-CONSOLE.md).
 
 Default ports: [`docs/runbooks/local-dev.md`](docs/runbooks/local-dev.md)
 
@@ -326,6 +331,7 @@ The consumer PWA already reserves an **Assets** surface so product messaging sta
 | [`docs/brand/SYSTEM.md`](docs/brand/SYSTEM.md) | Brand, logo modes, sonic / haptic |
 | [`docs/runbooks/local-dev.md`](docs/runbooks/local-dev.md) | Local ports and services |
 | [`docs/runbooks/MOBILE-ACCESS.md`](docs/runbooks/MOBILE-ACCESS.md) | Desktop PWA + iOS / Android access |
+| [`docs/product/ADMIN-CONSOLE.md`](docs/product/ADMIN-CONSOLE.md) | Super Admin console modules & login |
 | [`docs/threat-model/`](docs/threat-model/) | Threat model notes |
 | [`docs/intents/first-20.md`](docs/intents/first-20.md) | Core voice intents |
 
