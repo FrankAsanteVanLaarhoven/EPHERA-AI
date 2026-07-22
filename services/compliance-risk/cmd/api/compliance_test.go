@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -441,7 +442,7 @@ func TestTiersDoNotCrossSubjectTypes(t *testing.T) {
 	h.evidence(t, subject, "certificate_of_incorporation")
 
 	code, _ := h.call(t, "POST", "/v1/customers/"+subject+"/tier", map[string]any{
-		"tier": "premium", // a person tier
+		"tier":      "premium", // a person tier
 		"decidedBy": "compliance.officer@ephera.internal", "reason": "wrong type",
 	}, true)
 	if code == http.StatusOK {
@@ -558,4 +559,77 @@ func anyReasonHasPrefix(d map[string]any, prefix string) bool {
 		}
 	}
 	return false
+}
+
+// The daily limit must hold even when payments arrive at the same instant.
+// Reproduced before the fix: the decision read spent-today, decided, then
+// recorded, with no lock spanning the read and the write, so N concurrent
+// payments for one subject all read the same total and all passed — 640,000
+// allowed against a 500,000 limit. The decision is now serialised per subject.
+func TestDailyLimitHoldsUnderConcurrency(t *testing.T) {
+	h := newHarness(t)
+	h.verify(t, "verified") // daily 500,000, single 200,000, new-recipient 50,000
+
+	// Establish the recipient so the new-recipient ceiling does not interfere;
+	// this also spends 40,000 of the daily 500,000.
+	if d := h.decide(t, 40_000, "Ama Mensah"); d["outcome"] != "allow" {
+		t.Fatalf("setup payment was not allowed: %v", d)
+	}
+
+	// Fire 8 simultaneous 150,000 payments to the now-known recipient. Each is
+	// under the single-payment limit; collectively they are far over the daily
+	// limit. At most three can be allowed (40,000 + 3*150,000 = 490,000).
+	const n = 8
+	post := func() (string, int64) {
+		body, _ := json.Marshal(map[string]any{
+			"subject": h.subject, "amountMinor": 150_000, "currency": "GHS",
+			"recipientName": "Ama Mensah",
+		})
+		req, _ := http.NewRequest("POST", h.srv.URL+"/v1/decisions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Ephera-Service-Token", token)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return "error", 0
+		}
+		defer res.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(res.Body).Decode(&out)
+		outcome, _ := out["outcome"].(string)
+		return outcome, 150_000
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	allowedTotal := int64(40_000) // the setup payment
+	allowedCount := 0
+	start := make(chan struct{})
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			<-start // release together, to maximise overlap
+			outcome, amt := post()
+			if outcome == "allow" {
+				mu.Lock()
+				allowedTotal += amt
+				allowedCount++
+				mu.Unlock()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if allowedTotal > 500_000 {
+		t.Fatalf("daily limit breached under concurrency: %d allowed against a 500,000 limit "+
+			"(%d of %d concurrent payments passed)", allowedTotal, allowedCount, n)
+	}
+	// Sanity: the limit should still permit what fits, so this is not passing by
+	// refusing everything.
+	if allowedCount == 0 {
+		t.Fatal("no concurrent payment was allowed; the limit is refusing everything")
+	}
+	t.Logf("allowed %d of %d concurrent payments, total spent %d of 500,000",
+		allowedCount, n, allowedTotal)
 }

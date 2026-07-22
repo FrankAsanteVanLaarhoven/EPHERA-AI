@@ -59,10 +59,27 @@ func (s *server) operatorSetFrozen(w http.ResponseWriter, r *http.Request, freez
 		return
 	}
 
+	// The operator must hold a role that authorises restricting an account. The
+	// control plane already enforced this permission and maker-checker before
+	// applying, but the ledger is the authority for account state and re-checks
+	// rather than trusting the caller. Without this, any valid operator session —
+	// including a read-only or support role — could freeze or unfreeze.
+	if !op.HasRole("ops_manager") && !op.HasRole("compliance_officer") {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error":   "insufficient_role",
+			"message": "Freezing an account requires the ops_manager or compliance_officer role.",
+		})
+		return
+	}
+
 	var body operatorFreezeRequest
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	// An approved change is the authority for this. Without a reference there is
-	// nothing to check the action back against, so it is refused.
+	// nothing to check the action back against, so it is refused. The reference
+	// is validated upstream: this endpoint is service-token gated, so only the
+	// control plane — which enforced maker-checker on the change request — can
+	// reach it. A lone operator session can no longer call the ledger directly
+	// and skip that second approval.
 	if strings.TrimSpace(body.ChangeRequestID) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error":   "change_request_required",

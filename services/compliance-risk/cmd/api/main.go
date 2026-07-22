@@ -181,55 +181,52 @@ func (s *server) decide(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	spent, err := s.store.SpentToday(ctx, req.Subject)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	known, err := s.store.KnownRecipient(ctx, req.Subject, req.RecipientName)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	in := risk.Input{
-		Subject:         req.Subject,
-		CustomerStatus:  customer.Status,
-		Tier:            customer.Limits,
-		AmountMinor:     req.AmountMinor,
-		Currency:        req.Currency,
-		RecipientName:   req.RecipientName,
-		SpentTodayMinor: spent,
-		KnownRecipient:  known,
-		ScreeningHits:   hits,
-	}
-	decision := risk.Evaluate(in)
-
-	// Behavioural monitoring looks at the sequence, not this payment alone.
-	// It holds for review rather than denying: a pattern is suggestive, not
-	// conclusive, and denying on one punishes the innocent explanation.
+	// Behavioural monitoring looks at the sequence, not this payment alone. It
+	// holds for review rather than denying: a pattern is suggestive, not
+	// conclusive, and denying on one punishes the innocent explanation. This
+	// read is not part of the limit invariant, so it runs before the lock.
 	thresholds := monitoring.DefaultThresholds()
 	history, err := s.store.RecentPayments(ctx, req.Subject, longestWindow(thresholds))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	alerts := monitoring.Evaluate(time.Now(), monitoring.Payment{
-		AmountMinor: req.AmountMinor,
-		Recipient:   risk.NormaliseName(req.RecipientName),
-		At:          time.Now(),
-	}, history, thresholds)
 
-	if len(alerts) > 0 && decision.Outcome == risk.Allow {
-		decision.Outcome = risk.Review
-	}
-	for _, a := range alerts {
-		decision.Reasons = append(decision.Reasons, a.Rule+":"+a.Observation)
-	}
-
-	// Every decision is recorded, allow or refuse. The allowed ones are also
-	// what the daily total and the known-recipient check are computed from.
-	if err := s.store.RecordDecision(ctx, in, decision); err != nil {
+	// The limit read (spent-today, known-recipient), the decision, and the
+	// record of it happen together under a per-subject lock, so concurrent
+	// payments for the same subject cannot all read the same spent-today and
+	// each pass a limit the sum of them breaks. Everything that determines the
+	// recorded outcome — including the behavioural upgrade — is computed inside,
+	// so the row that is written is the final one.
+	var in risk.Input
+	decision, err := s.store.DecideUnderSubjectLock(ctx, req.Subject, req.RecipientName,
+		func(spent int64, known bool) (risk.Input, risk.Decision) {
+			in = risk.Input{
+				Subject:         req.Subject,
+				CustomerStatus:  customer.Status,
+				Tier:            customer.Limits,
+				AmountMinor:     req.AmountMinor,
+				Currency:        req.Currency,
+				RecipientName:   req.RecipientName,
+				SpentTodayMinor: spent,
+				KnownRecipient:  known,
+				ScreeningHits:   hits,
+			}
+			d := risk.Evaluate(in)
+			alerts := monitoring.Evaluate(time.Now(), monitoring.Payment{
+				AmountMinor: req.AmountMinor,
+				Recipient:   risk.NormaliseName(req.RecipientName),
+				At:          time.Now(),
+			}, history, thresholds)
+			if len(alerts) > 0 && d.Outcome == risk.Allow {
+				d.Outcome = risk.Review
+			}
+			for _, a := range alerts {
+				d.Reasons = append(d.Reasons, a.Rule+":"+a.Observation)
+			}
+			return in, d
+		})
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

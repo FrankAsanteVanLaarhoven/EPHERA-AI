@@ -5,13 +5,14 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/ephera/compliance-risk/internal/monitoring"
 	"github.com/ephera/compliance-risk/internal/risk"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -35,8 +36,8 @@ func New(ctx context.Context, url string) (*Store, error) {
 	return &Store{pool: pool}, nil
 }
 
-func (s *Store) Close()                 { s.pool.Close() }
-func (s *Store) Pool() *pgxpool.Pool    { return s.pool }
+func (s *Store) Close()              { s.pool.Close() }
+func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
 type Customer struct {
 	Subject     string    `json:"subject"`
@@ -141,11 +142,18 @@ func (s *Store) Screen(ctx context.Context, name string) ([]risk.ScreeningHit, e
 	return hits, rows.Err()
 }
 
-// SpentToday totals what a subject has already had allowed today. Only allowed
-// decisions count: a refused attempt does not consume someone's limit.
-func (s *Store) SpentToday(ctx context.Context, subject string) (int64, error) {
+// querier is the subset of pgx satisfied by both the pool and a transaction, so
+// the read/record helpers can run either standalone or inside the per-subject
+// lock held by DecideUnderSubjectLock.
+type querier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func spentTodayQ(ctx context.Context, q querier, subject string) (int64, error) {
 	var total *int64
-	err := s.pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		SELECT sum(amount_minor) FROM risk_decisions
 		WHERE subject = $1 AND outcome = 'allow' AND decided_at >= date_trunc('day', now())
 	`, subject).Scan(&total)
@@ -158,28 +166,86 @@ func (s *Store) SpentToday(ctx context.Context, subject string) (int64, error) {
 	return *total, nil
 }
 
-// KnownRecipient reports whether this subject has been allowed to pay this
-// recipient before.
-func (s *Store) KnownRecipient(ctx context.Context, subject, recipient string) (bool, error) {
+func knownRecipientQ(ctx context.Context, q querier, subject, recipient string) (bool, error) {
 	var n int
-	err := s.pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		SELECT count(*) FROM risk_decisions
 		WHERE subject = $1 AND recipient = $2 AND outcome = 'allow'
 	`, subject, risk.NormaliseName(recipient)).Scan(&n)
 	return n > 0, err
 }
 
-func (s *Store) RecordDecision(ctx context.Context, in risk.Input, d risk.Decision) error {
+func recordDecisionQ(ctx context.Context, q querier, in risk.Input, d risk.Decision) error {
 	reasons, err := json.Marshal(d.Reasons)
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx, `
+	_, err = q.Exec(ctx, `
 		INSERT INTO risk_decisions (subject, amount_minor, currency, recipient, outcome, reasons, tier)
 		VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)
 	`, in.Subject, in.AmountMinor, in.Currency, risk.NormaliseName(in.RecipientName),
 		string(d.Outcome), reasons, in.Tier.Name)
 	return err
+}
+
+// SpentToday totals what a subject has already had allowed today. Only allowed
+// decisions count: a refused attempt does not consume someone's limit.
+func (s *Store) SpentToday(ctx context.Context, subject string) (int64, error) {
+	return spentTodayQ(ctx, s.pool, subject)
+}
+
+// KnownRecipient reports whether this subject has been allowed to pay this
+// recipient before.
+func (s *Store) KnownRecipient(ctx context.Context, subject, recipient string) (bool, error) {
+	return knownRecipientQ(ctx, s.pool, subject, recipient)
+}
+
+func (s *Store) RecordDecision(ctx context.Context, in risk.Input, d risk.Decision) error {
+	return recordDecisionQ(ctx, s.pool, in, d)
+}
+
+// DecideUnderSubjectLock serialises the whole decision for one subject.
+//
+// The daily and new-recipient limits are read from prior decisions and then a
+// new decision is written; if that read-then-write is not serialised, N
+// concurrent payments for the same subject all read the same spent-today and
+// all pass, and the limit is breached (reproduced: 640,000 allowed against a
+// 500,000 limit under 8 concurrent requests).
+//
+// A transaction-scoped advisory lock keyed by the subject fixes this: concurrent
+// decisions for the same subject serialise here, so each reads a spent-today
+// that already includes every decision committed before it. Different subjects
+// hash to different keys and do not block each other. The lock is released when
+// the transaction commits or rolls back.
+func (s *Store) DecideUnderSubjectLock(
+	ctx context.Context, subject, recipient string,
+	decide func(spentToday int64, knownRecipient bool) (risk.Input, risk.Decision),
+) (risk.Decision, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return risk.Decision{}, err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, subject); err != nil {
+		return risk.Decision{}, err
+	}
+	spent, err := spentTodayQ(ctx, tx, subject)
+	if err != nil {
+		return risk.Decision{}, err
+	}
+	known, err := knownRecipientQ(ctx, tx, subject, recipient)
+	if err != nil {
+		return risk.Decision{}, err
+	}
+	in, d := decide(spent, known)
+	if err := recordDecisionQ(ctx, tx, in, d); err != nil {
+		return risk.Decision{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return risk.Decision{}, err
+	}
+	return d, nil
 }
 
 type Case struct {
@@ -244,9 +310,9 @@ func (s *Store) ListOpenCases(ctx context.Context, limit int) ([]Case, error) {
 // --- KYB, KYA and evidence ---
 
 var (
-	ErrEvidenceMissing    = errors.New("the evidence this tier requires has not been verified")
-	ErrSelfReview         = errors.New("a document cannot be verified by its subject")
-	ErrDocumentNotFound   = errors.New("document not found")
+	ErrEvidenceMissing  = errors.New("the evidence this tier requires has not been verified")
+	ErrSelfReview       = errors.New("a document cannot be verified by its subject")
+	ErrDocumentNotFound = errors.New("document not found")
 )
 
 type Document struct {

@@ -43,7 +43,7 @@ func main() {
 		store:          st,
 		sessionPK:      pk,
 		allowedOrigins: origins,
-		applier:        effect.NewHTTPApplier(env("LEDGER_URL", "http://localhost:8092"), st),
+		applier:        effect.NewHTTPApplier(env("LEDGER_URL", "http://localhost:8092"), os.Getenv("LEDGER_SERVICE_TOKEN"), st),
 		compliance:     compliance.New(env("COMPLIANCE_URL", "http://localhost:8095")),
 		serviceToken:   os.Getenv("CONTROL_SERVICE_TOKEN"),
 	}

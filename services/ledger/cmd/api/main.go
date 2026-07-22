@@ -78,8 +78,11 @@ func main() {
 	// Operators, authenticated by their own session.
 	mux.HandleFunc("GET /v1/receipts/{id}", s.serviceOnly(s.getReceipt))
 	mux.HandleFunc("GET /v1/transfers/{id}/receipt", s.serviceOnly(s.getReceiptForTransfer))
-	mux.HandleFunc("POST /v1/operator/accounts/{ref}/freeze", s.operatorFreeze)
-	mux.HandleFunc("POST /v1/operator/accounts/{ref}/unfreeze", s.operatorUnfreeze)
+	// Service-token gated: only the control plane, which enforces maker-checker,
+	// may apply an operator freeze. The operator session it forwards is verified
+	// inside the handler for the evidence trail and the role check.
+	mux.HandleFunc("POST /v1/operator/accounts/{ref}/freeze", s.serviceOnly(s.operatorFreeze))
+	mux.HandleFunc("POST /v1/operator/accounts/{ref}/unfreeze", s.serviceOnly(s.operatorUnfreeze))
 
 	log.Printf("EPHERA ledger API on %s", httpAddr)
 	// No CORS. The ledger is not a browser-facing service: customer surfaces go

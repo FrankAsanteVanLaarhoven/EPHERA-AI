@@ -54,15 +54,21 @@ type FlagSetter interface {
 // HTTPApplier routes actions to the services that own them.
 type HTTPApplier struct {
 	LedgerURL string
-	Client    *http.Client
-	Flags     FlagSetter
+	// ServiceToken authenticates this control plane to the ledger's operator
+	// endpoints. Those endpoints are service-token gated so a lone operator
+	// session cannot reach them directly and bypass maker-checker; the control
+	// plane, which enforced maker-checker, is the only caller that holds it.
+	ServiceToken string
+	Client       *http.Client
+	Flags        FlagSetter
 }
 
-func NewHTTPApplier(ledgerURL string, flags FlagSetter) *HTTPApplier {
+func NewHTTPApplier(ledgerURL, serviceToken string, flags FlagSetter) *HTTPApplier {
 	return &HTTPApplier{
-		LedgerURL: ledgerURL,
-		Client:    &http.Client{Timeout: 10 * time.Second},
-		Flags:     flags,
+		LedgerURL:    ledgerURL,
+		ServiceToken: serviceToken,
+		Client:       &http.Client{Timeout: 10 * time.Second},
+		Flags:        flags,
 	}
 }
 
@@ -117,6 +123,9 @@ func (a *HTTPApplier) wallet(ctx context.Context, req Request, verb string) erro
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+req.OperatorSession)
+	if a.ServiceToken != "" {
+		httpReq.Header.Set("X-Ephera-Service-Token", a.ServiceToken)
+	}
 
 	res, err := a.Client.Do(httpReq)
 	if err != nil {
