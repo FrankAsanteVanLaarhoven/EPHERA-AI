@@ -20,7 +20,7 @@ import (
 // the identity service is unreachable.
 
 var (
-	ErrGrantAlreadyUsed  = errors.New("authorisation grant already used")
+	ErrGrantAlreadyUsed   = errors.New("authorisation grant already used")
 	ErrGrantNotVerifiable = errors.New("ledger has no authorisation public key configured")
 )
 

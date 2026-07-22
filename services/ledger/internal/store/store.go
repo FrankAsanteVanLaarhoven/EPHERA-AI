@@ -375,16 +375,15 @@ func (s *Store) CaptureTransfer(ctx context.Context, req TransferRequest) (strin
 	// either finds this row already present or collides on the primary key,
 	// and in both cases the whole transfer rolls back. There is no window in
 	// which a replayed grant can post.
-	_, err = tx.Exec(ctx, `
-		INSERT INTO authorisation_grants
-			(jti, subject, method, binding_digest, transfer_id, journal_entry_id, issued_at, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6, to_timestamp($7), to_timestamp($8))
-	`, grant.ID, grant.Subject, string(grant.Method), grant.Binding, req.TransferID, jeID,
-		grant.IssuedAt, grant.ExpiresAt)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return "", ErrGrantAlreadyUsed
-		}
+	//
+	// This is the same call the bounded-authority adapter makes, so the
+	// conformance suite exercises the statement that actually posts money
+	// rather than a copy of it that could drift from it.
+	if err := consumeGrant(ctx, tx, grantConsumption{
+		JTI: grant.ID, Subject: grant.Subject, Method: string(grant.Method),
+		BindingDigest: grant.Binding, TransferID: req.TransferID,
+		JournalEntryID: jeID, IssuedAt: grant.IssuedAt, ExpiresAt: grant.ExpiresAt,
+	}); err != nil {
 		return "", err
 	}
 

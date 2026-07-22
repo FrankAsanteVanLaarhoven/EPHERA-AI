@@ -126,6 +126,38 @@ if (cd modules/boundedauth && go test ./conformance/... -race -count=3 >/tmp/eph
 else
   red "conformance suite self-test"
 fi
+# The reference store, against a real PostgreSQL. What the contract requires is
+# a property of the transaction, so an in-memory pass does not establish it.
+if have_pg; then
+  "$DOCKER" compose -f infrastructure/docker-compose.yml exec -T postgres \
+    psql -qtA -U ephera -d postgres -c "CREATE DATABASE boundedauth_ref" >/dev/null 2>&1
+  if (cd modules/boundedauth/postgres && \
+      BOUNDEDAUTH_TEST_DATABASE_URL="$PG/boundedauth_ref?sslmode=disable" \
+      go test ./... -race >/tmp/ephera-verify.log 2>&1); then
+    green "the PostgreSQL reference store satisfies the contract, on a real database"
+  else
+    red "PostgreSQL reference store"
+    tail -5 /tmp/ephera-verify.log | sed 's/^/        /'
+  fi
+else
+  grey "PostgreSQL reference store" "Postgres is not running"
+fi
+
+# The claim that matters for this platform: the ledger is judged by the same
+# contract, using the statement that actually posts money.
+if have_pg; then
+  if (cd services/ledger && \
+      LEDGER_TEST_DATABASE_URL="$PG/ephera_ledger?sslmode=disable" \
+      go test ./internal/store/ -race -run BoundedAuthority >/tmp/ephera-verify.log 2>&1); then
+    green "EPHERA's ledger satisfies the same contract as an outside implementation"
+  else
+    red "ledger bounded-authority conformance"
+    tail -5 /tmp/ephera-verify.log | sed 's/^/        /'
+  fi
+else
+  grey "ledger bounded-authority conformance" "Postgres is not running"
+fi
+
 # A specification nobody else can implement is documentation. This reproduces
 # every published vector from an implementation in another language.
 if out=$(cd modules/boundedauth && python3 testdata/verify_vectors.py 2>&1); then

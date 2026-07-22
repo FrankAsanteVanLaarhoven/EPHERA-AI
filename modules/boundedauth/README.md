@@ -88,7 +88,9 @@ claim, not a check.
 | Repointing does not burn the credential | `go test -run TestARepointedCredentialIsNotSpent` |
 | The lifetime ceiling holds even against its own issuer | `go test -run TestLifetimeCeilingIsEnforcedAtVerifyNotOnlyAtMint` |
 | Test credentials are refused unless explicitly permitted | `go test -run TestTestMethodIsRefusedByDefault` |
-| The reference store satisfies the atomicity contract | `go test ./memory/... -race` |
+| The in-memory reference store satisfies the atomicity contract | `go test ./memory/... -race` |
+| A **PostgreSQL** store satisfies it on a real database | `cd postgres && BOUNDEDAUTH_TEST_DATABASE_URL=... go test ./... -race` |
+| The suite catches an effect written on the wrong connection | `go test ./postgres/... -run WrongConnection` |
 | The conformance suite fails stores that do not | `go test ./conformance/... -race` |
 | A receipt can be intact and still describe the wrong payment | `go test -run TestReceiptIsCheckedAgainstTheAuthorityNotOnlyItself` |
 
@@ -118,10 +120,25 @@ Everything: `go test ./... -race`.
 | `receipt.go` | Receipts bound to the authority that permitted them |
 | `conformance/` | Checks a host's store; tested against broken stores |
 | `memory/` | Reference store, passes the suite under `-race` |
+| `postgres/` | PostgreSQL reference store — separate module, so the core keeps zero dependencies |
 | `SPEC.md` | Normative specification |
 | `testdata/` | Cross-language vectors and a second implementation |
 
-Zero dependencies outside the Go standard library.
+The core has zero dependencies outside the Go standard library. `postgres/` is a
+separate module so that embedding a verifier does not pull in a database driver.
+
+## Who implements it
+
+| Implementation | Status |
+| --- | --- |
+| `memory` | Reference. Passes the suite under `-race` |
+| `postgres` | Reference. Passes on a real PostgreSQL under `-race` |
+| EPHERA ledger | Passes the same suite, exercising the statement that posts money |
+
+The last row is the one worth reading twice. The contract was extracted from
+that ledger, which makes it the implementation most likely to be assumed
+correct and least likely to be tested against the thing it inspired. It is now
+judged by the same suite as an outside implementation would be.
 
 ## Licence
 

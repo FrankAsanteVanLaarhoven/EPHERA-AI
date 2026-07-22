@@ -43,6 +43,7 @@ evidence — and the platform can demonstrate each of those clauses on demand.
 | 10 | The kill switch stops payments, and stays stopped if the control plane becomes unreachable | `services/payments/internal/flags` tests |
 | 11 | Provider credentials use CSPRNG secrets, HMAC-SHA-256 and constant-time comparison, with real replay protection | `@ephera/connect-layer` tests |
 | 12 | Fraud detection is measured on false positives as well as detection, so neither can be improved quietly at the other's expense | `internal/fraud` benchmark |
+| 13 | Single use is a checkable contract, not a claim: an authorisation is spent atomically with the money it moves, and the ledger is judged by the same suite an outside implementation would be | `modules/boundedauth/conformance`, run against the ledger |
 
 ### Demonstrated end to end, in a real browser
 
@@ -82,6 +83,10 @@ than one that admits them.
   workload identity.
 - **No penetration test, no third-party audit**, no load or resilience testing.
 - **Console and provider-portal reads are still seed data** held in memory.
+- **`CaptureTransfer` does not route through the bounded-authority `Consume`
+  method.** It opens its own transaction, because it does far more than one
+  effect. The two share the consuming statement, which is what the conformance
+  result rests on — not a shared control flow.
 - **No live funds, no production credentials, no real customer data** have ever
   been in this system.
 - **There is no AI in the money path.** The intent compiler is 151 lines of

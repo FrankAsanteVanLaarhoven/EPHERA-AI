@@ -1,9 +1,9 @@
-module github.com/ephera/ledger
+module github.com/FrankAsanteVanLaarhoven/boundedauth/postgres
 
 go 1.22
 
 require (
-	github.com/google/uuid v1.6.0
+	github.com/FrankAsanteVanLaarhoven/boundedauth v0.0.0
 	github.com/jackc/pgx/v5 v5.7.2
 )
 
@@ -16,10 +16,4 @@ require (
 	golang.org/x/text v0.21.0 // indirect
 )
 
-require github.com/ephera/authgrant v0.0.0
-
-replace github.com/ephera/authgrant => ../authgrant
-
-require github.com/FrankAsanteVanLaarhoven/boundedauth v0.0.0
-
-replace github.com/FrankAsanteVanLaarhoven/boundedauth => ../../modules/boundedauth
+replace github.com/FrankAsanteVanLaarhoven/boundedauth => ../
