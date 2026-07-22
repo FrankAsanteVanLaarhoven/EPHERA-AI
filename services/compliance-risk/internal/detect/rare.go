@@ -118,7 +118,7 @@ type RarityResult struct {
 	// claim. Reporting "rare" from thirty observations is noise dressed as
 	// signal, and acting on it means stopping customers on the strength of a
 	// small sample.
-	Confident bool `json:"confident"`
+	Confident bool   `json:"confident"`
 	Reason    string `json:"reason"`
 }
 
