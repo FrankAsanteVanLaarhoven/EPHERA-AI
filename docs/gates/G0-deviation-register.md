@@ -128,7 +128,7 @@ Closed after G4.
 | D-42 | S3 | An entire route tree is dead code and holds the stricter logic, while roughly eight further screens are unreachable | `apps/mobile/index.js:2-4` | G1 |
 | D-43 | S3 | No client authentication of any kind. Every request is anonymous against a hardcoded account reference | `apps/mobile/lib/api.ts:13,47,77`; `apps/consumer-pwa/src/lib/api.ts:12` | G2 |
 | D-44 | S3 | Sign-in controls navigate without authenticating, and the security store reports passkeys, biometrics and a transaction PIN as enabled for mechanisms that do not exist | `apps/mobile/screens/WelcomeScreen.tsx:46-58`; `lib/security-store.ts:46-51` | G2 |
-| D-45 | S2 | The payment orchestrator has no tests on the money path. Its only test file covers one rail simulator; the transfer workflow, the activities and the ledger client are untested. Added 2026-07-21 during G1, having been missed at G0 | `services/payments/internal/workflow/`; `internal/ledgerclient/`; only test file is `internal/adapter/mobilemoney/sim_test.go` | G1/G5 |
+| D-45 | S2 | **Closed.** The transfer workflow is tested, including the compensation path: a failed rail releases the hold and does not capture. Each assertion was mutation-checked — deliberately breaking the release and the fee source made the tests fail, so they are not merely passing. Originally: the payment orchestrator had no tests on the money path. Its only test file covers one rail simulator; the transfer workflow, the activities and the ledger client are untested. Added 2026-07-21 during G1, having been missed at G0 | `services/payments/internal/workflow/`; `internal/ledgerclient/`; only test file is `internal/adapter/mobilemoney/sim_test.go` | G1/G5 |
 
 ## Absent subsystems
 
