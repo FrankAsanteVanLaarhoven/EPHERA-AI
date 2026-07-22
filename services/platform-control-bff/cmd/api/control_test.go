@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
@@ -13,8 +14,21 @@ import (
 	"time"
 
 	"github.com/ephera/authgrant/session"
+	"github.com/ephera/platform-control-bff/internal/effect"
 	"github.com/ephera/platform-control-bff/internal/store"
 )
+
+// recordingApplier stands in for the owning service so the apply path can be
+// tested without one, and so a refusal can be simulated.
+type recordingApplier struct {
+	calls []effect.Request
+	err   error
+}
+
+func (a *recordingApplier) Apply(_ context.Context, req effect.Request) error {
+	a.calls = append(a.calls, req)
+	return a.err
+}
 
 // Negative authorisation tests for the control plane. These are the gate's
 // exit condition: every one of them describes something the previous console
@@ -23,9 +37,10 @@ import (
 // Skipped unless CONTROL_TEST_DATABASE_URL is set.
 
 type harness struct {
-	srv  *httptest.Server
-	priv ed25519.PrivateKey
-	st   *store.Store
+	srv     *httptest.Server
+	priv    ed25519.PrivateKey
+	st      *store.Store
+	applier *recordingApplier
 }
 
 func newHarness(t *testing.T) *harness {
@@ -44,10 +59,11 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("keygen: %v", err)
 	}
-	s := &server{store: st, sessionPK: pub}
+	ap := &recordingApplier{}
+	s := &server{store: st, sessionPK: pub, applier: ap}
 	srv := httptest.NewServer(s.routes())
 	t.Cleanup(srv.Close)
-	return &harness{srv: srv, priv: priv, st: st}
+	return &harness{srv: srv, priv: priv, st: st, applier: ap}
 }
 
 // token mints a session as identity-access would, after a passkey assertion.
@@ -382,5 +398,109 @@ func TestExpiredSessionRefused(t *testing.T) {
 	}
 	if code, _ := h.do(t, "GET", "/v1/me", tok, nil); code != http.StatusUnauthorized {
 		t.Fatalf("expired session returned %d, expected 401", code)
+	}
+}
+
+
+// D-17. Applying an approved change must reach the service that owns the thing
+// being changed, carrying the approval it was authorised under.
+func TestApplyCallsTheOwningService(t *testing.T) {
+	h := newHarness(t)
+	makerTok := h.token(t, maker, nil)
+	checkerTok := h.token(t, checker, nil)
+
+	code, body := h.do(t, "POST", "/v1/changes", makerTok, freezeProposal())
+	if code != http.StatusCreated {
+		t.Fatalf("propose: %d %v", code, body)
+	}
+	id := body["id"].(string)
+	h.do(t, "POST", "/v1/changes/"+id+"/decision", checkerTok,
+		map[string]any{"decision": "approved", "note": "ok"})
+
+	if len(h.applier.calls) != 0 {
+		t.Fatal("the owning service was called before the change was applied")
+	}
+	if code, body = h.do(t, "POST", "/v1/changes/"+id+"/apply", makerTok, nil); code != http.StatusOK {
+		t.Fatalf("apply: %d %v", code, body)
+	}
+	if len(h.applier.calls) != 1 {
+		t.Fatalf("expected one call to the owning service, got %d", len(h.applier.calls))
+	}
+	call := h.applier.calls[0]
+	if call.Action != "wallet.freeze" || call.Target != "user:demo-self:GHS" {
+		t.Fatalf("wrong effect dispatched: %+v", call)
+	}
+	if call.ChangeRequestID != id {
+		t.Fatalf("effect did not carry the approval: %q", call.ChangeRequestID)
+	}
+	if call.OperatorSession == "" {
+		t.Fatal("effect did not carry the operator session for the owning service to verify")
+	}
+}
+
+// If the owning service refuses, the change must NOT be recorded as applied.
+// Claiming an effect that did not happen is the defect being fixed.
+func TestFailedEffectIsNotRecordedAsApplied(t *testing.T) {
+	h := newHarness(t)
+	makerTok := h.token(t, maker, nil)
+	checkerTok := h.token(t, checker, nil)
+
+	code, body := h.do(t, "POST", "/v1/changes", makerTok, freezeProposal())
+	if code != http.StatusCreated {
+		t.Fatalf("propose: %d %v", code, body)
+	}
+	id := body["id"].(string)
+	h.do(t, "POST", "/v1/changes/"+id+"/decision", checkerTok,
+		map[string]any{"decision": "approved", "note": "ok"})
+
+	h.applier.err = errors.New("ledger unreachable")
+	if code, _ = h.do(t, "POST", "/v1/changes/"+id+"/apply", makerTok, nil); code != http.StatusBadGateway {
+		t.Fatalf("apply with a failing effect returned %d, expected 502", code)
+	}
+
+	cr, err := h.st.GetChangeRequest(context.Background(), id)
+	if err != nil {
+		t.Fatalf("read change: %v", err)
+	}
+	if cr.Status != "approved" {
+		t.Fatalf("status is %q; a failed effect must leave it approved, not applied", cr.Status)
+	}
+
+	var outcome string
+	if err := h.st.Pool().QueryRow(context.Background(),
+		`SELECT outcome FROM audit_log WHERE change_request_id = $1 ORDER BY seq DESC LIMIT 1`,
+		id).Scan(&outcome); err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	if outcome != "failed" {
+		t.Fatalf("audit outcome is %q, expected failed", outcome)
+	}
+}
+
+// An action with no owning service is refused rather than reported as applied.
+func TestActionWithNoOwningServiceIsRefused(t *testing.T) {
+	h := newHarness(t)
+	makerTok := h.token(t, maker, nil)
+	checkerTok := h.token(t, checker, nil)
+
+	p := freezeProposal()
+	p["action"] = "kill_switch"
+	p["target"] = "payments"
+	code, body := h.do(t, "POST", "/v1/changes", makerTok, p)
+	if code != http.StatusCreated {
+		t.Fatalf("propose: %d %v", code, body)
+	}
+	id := body["id"].(string)
+	h.do(t, "POST", "/v1/changes/"+id+"/decision", checkerTok,
+		map[string]any{"decision": "approved", "note": "ok"})
+
+	h.applier.err = effect.ErrNoOwningService
+	code, _ = h.do(t, "POST", "/v1/changes/"+id+"/apply", makerTok, nil)
+	if code != http.StatusNotImplemented {
+		t.Fatalf("kill switch apply returned %d, expected 501", code)
+	}
+	cr, _ := h.st.GetChangeRequest(context.Background(), id)
+	if cr.Status == "applied" {
+		t.Fatal("an action with no owning service was recorded as applied")
 	}
 }

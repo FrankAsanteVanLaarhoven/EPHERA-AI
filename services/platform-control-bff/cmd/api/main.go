@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ephera/platform-control-bff/internal/effect"
 	"github.com/ephera/platform-control-bff/internal/store"
 )
 
@@ -37,7 +38,12 @@ func main() {
 	}
 
 	origins := strings.Split(env("CONTROL_ALLOWED_ORIGINS", "http://localhost:3007"), ",")
-	s := &server{store: st, sessionPK: pk, allowedOrigins: origins}
+	s := &server{
+		store:          st,
+		sessionPK:      pk,
+		allowedOrigins: origins,
+		applier:        effect.NewHTTPApplier(env("LEDGER_URL", "http://localhost:8092")),
+	}
 	log.Printf("EPHERA platform-control-bff on %s", addr)
 	if err := http.ListenAndServe(addr, s.routes()); err != nil {
 		log.Fatal(err)

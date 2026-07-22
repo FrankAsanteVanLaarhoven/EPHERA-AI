@@ -72,6 +72,26 @@ the service.
 | `go vet` in both | clean |
 | `./scripts/db-migrate.sh platform-control-bff` | applied; re-run a no-op |
 
+### D-17, demonstrated end to end
+
+Real passkey-derived operator sessions against the running stack:
+
+| Step | Result |
+| --- | --- |
+| Account before | `active` |
+| Maker proposes `wallet.freeze` | change created |
+| Maker approves own change | **403** |
+| Maker applies before approval | **409**, account still `active` |
+| Checker approves | `approved` |
+| Maker applies | `applied` |
+| **Account after** | **`frozen`** |
+| Placing a hold on the frozen account | `account_frozen` |
+| Ledger evidence | `operator_session`, operator recorded, change request recorded |
+| Ledger freeze with no session / a forged one | **401** |
+
+The account was restored to `active` through the same propose-approve-apply
+path afterwards.
+
 ### Demonstrated in a real browser
 
 Two operators, two virtual authenticators, real WebAuthn:
@@ -148,9 +168,15 @@ because a test verifies the chain rather than assuming it.
   browser against a value printed on the login screen and in the README; the
   server never saw it. Leaving it would have implied protection that never
   existed.
-- **Applying a change records authorisation, it does not perform the effect.**
-  Freezing a wallet or flipping a flag still has to be carried out by the owning
-  service. The approval gate is real; the downstream call is the next increment.
+- **Applying a change now performs the effect, for the actions that have an
+  owning service.** An approved `wallet.freeze` calls the ledger and the account
+  is genuinely frozen (D-17). The ledger verifies the operator's session itself
+  and records which approved change authorised it, so the freeze path no longer
+  accepts any non-empty string the way capture did before G2-A.
+  `kill_switch`, `features.edit`, `provider.approve` and `mandate.change` have
+  **no owning service in this codebase**, so applying them returns 501 rather
+  than being recorded as applied. The kill switch is still not wired to
+  anything — but it now says so instead of reporting success.
 - Sessions cannot be revoked before expiry. The 30-minute ceiling bounds the
   exposure; a revocation list is outstanding.
 - Break-glass and just-in-time elevation do not exist. Maker-checker covers the

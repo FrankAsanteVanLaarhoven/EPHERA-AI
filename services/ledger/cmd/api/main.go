@@ -53,6 +53,8 @@ func main() {
 	mux.HandleFunc("POST /v1/holds", s.hold)
 	mux.HandleFunc("POST /v1/holds/{id}/release", s.releaseHold)
 	mux.HandleFunc("POST /v1/transfers", s.transfer)
+	mux.HandleFunc("POST /v1/operator/accounts/{ref}/freeze", s.operatorFreeze)
+	mux.HandleFunc("POST /v1/operator/accounts/{ref}/unfreeze", s.operatorUnfreeze)
 
 	log.Printf("EPHERA ledger API on %s", httpAddr)
 	if err := http.ListenAndServe(httpAddr, withCORS(mux)); err != nil {
@@ -187,6 +189,11 @@ func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"journalEntryId": je, "status": "posted"})
 }
+
+var (
+	errMissingSession = errors.New("missing bearer operator session")
+	errNoKey          = errors.New("ledger has no authorisation public key configured")
+)
 
 func writeStoreErr(w http.ResponseWriter, err error) {
 	switch {

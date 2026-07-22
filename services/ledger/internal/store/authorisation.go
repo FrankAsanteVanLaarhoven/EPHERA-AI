@@ -78,3 +78,7 @@ func isUniqueViolation(err error) bool {
 	}
 	return false
 }
+
+// AuthorisationKey exposes the configured public key. Operator sessions are
+// signed by the same identity service, so they verify against the same key.
+func (s *Store) AuthorisationKey() ed25519.PublicKey { return s.authPublicKey }

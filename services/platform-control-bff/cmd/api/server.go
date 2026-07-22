@@ -31,11 +31,13 @@ import (
 
 	"github.com/ephera/authgrant/session"
 	"github.com/ephera/platform-control-bff/internal/authz"
+	"github.com/ephera/platform-control-bff/internal/effect"
 	"github.com/ephera/platform-control-bff/internal/store"
 )
 
 type server struct {
 	store          *store.Store
+	applier        effect.Applier
 	sessionPK      []byte // ed25519 public key of identity-access
 	allowedOrigins []string
 	now            func() time.Time
@@ -340,13 +342,36 @@ func (s *server) applyChange(w http.ResponseWriter, r *http.Request) {
 			"error": "not_approved", "message": "This change has not been approved."})
 		return
 	}
+	// Carry out the change against the service that owns it, BEFORE recording it
+	// as applied. If the owning service refuses or is unreachable, the request
+	// stays approved-but-unapplied and the failure is audited: the control plane
+	// must never claim an effect it did not achieve (D-17).
+	token := strings.TrimSpace(r.Header.Get("Authorization"))
+	token = strings.TrimSpace(token[len("Bearer "):])
+	if err := s.applier.Apply(r.Context(), effect.Request{
+		Action:          cr.Action,
+		Target:          cr.Target,
+		ChangeRequestID: id,
+		Reason:          cr.Reason,
+		OperatorSession: token,
+	}); err != nil {
+		s.audit(r.Context(), pr, cr.Action, cr.Target, "failed",
+			map[string]any{"reason": err.Error(), "approvedBy": cr.DecidedBy}, &id)
+		status := http.StatusBadGateway
+		if errors.Is(err, effect.ErrNoOwningService) {
+			status = http.StatusNotImplemented
+		}
+		writeJSON(w, status, map[string]string{
+			"error":   "effect_failed",
+			"message": err.Error(),
+		})
+		return
+	}
+
 	if err := s.store.MarkApplied(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "not_approved"})
 		return
 	}
-	// The downstream effect (freeze, flag change, provider approval) is carried
-	// out by the owning service. This gate records that it was authorised to
-	// happen; wiring the effects is the next increment.
 	s.audit(r.Context(), pr, cr.Action, cr.Target, "applied",
 		map[string]any{"approvedBy": cr.DecidedBy, "proposedBy": cr.RequestedBy}, &id)
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "status": "applied"})
