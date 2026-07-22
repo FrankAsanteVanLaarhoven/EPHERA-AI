@@ -120,6 +120,16 @@ Ephemeral UI is how users interact with EPHERA — it is **not** the product’s
 
 ## Architecture
 
+> **Full system design — [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).** Component,
+> sequence, data, security and trust-boundary diagrams; the one-payment critical
+> path; and a maturity table stating exactly what is built versus simulated.
+
+The authorisation primitive at the centre of this platform — a signed,
+transaction-bound, single-use credential — is extracted and published as a
+standalone product: **[BoundedAuth-AI](https://github.com/FrankAsanteVanLaarhoven/BoundedAuth-AI)**.
+EPHERA's ledger is one implementation of its contract, held to the same
+conformance suite an outside adopter would run.
+
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
 │  Clients                                                         │

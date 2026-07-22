@@ -62,7 +62,7 @@ flowchart TB
         IDN["identity-access<br/><b>ISSUER</b><br/>WebAuthn · mints credentials"]
         PAY["payments<br/><b>orchestrator</b><br/>Temporal workflows"]
         LED["ledger<br/><b>VERIFIER + money truth</b><br/>double entry · receipts"]
-        CRK["compliance-risk<br/>KYC tiers · limits · screening<br/>fraud · rarity detection"]
+        CRK["compliance-risk<br/>KYC tiers · limits · fuzzy screening<br/>fraud · rare-event situation awareness"]
         VOI["voice-intent<br/><i>proposes typed intents only</i>"]
     end
 
@@ -134,12 +134,18 @@ sequenceDiagram
     end
     L-->>P: journal entry + receipt
 
-    P->>R: execute on rail
-    alt rail fails
-        R-->>P: failure
-        P->>L: compensate — release hold, no capture
+    P->>R: deliver on rail (post-settlement)
+    alt rail fails after settlement
+        R-->>P: delivery_failed
+        Note over P,L: money already moved to the recipient wallet;<br/>transfer stays settled, delivery flagged for reconciliation
     end
 ```
+
+Capture is the settlement and runs **before** the rail: a capture failure releases
+the hold and stops (nothing delivered); a rail failure *after* capture does not
+strand a hold, because the recipient already holds the funds — it is recorded as
+`delivery_failed`. The rail is idempotent on the idempotency key, so a retry does
+not deliver twice.
 
 **The shaded block is the whole architecture in one place.** Verification,
 consumption, posting, evidence and receipt commit together or not at all. There
@@ -160,7 +166,7 @@ credential against the wrong transaction refuses it without burning it.
 | **ledger** | Balances, double-entry postings, holds, authorisation verification, consumption records, receipts | Accept an unverified authorisation; expose any balance-write path |
 | **identity-access** | WebAuthn registration and assertion, credential minting, the only private key | Mint without a completed authenticator ceremony |
 | **payments** | Transfer lifecycle, Temporal workflows, rail selection, compensation | Post money; its opinion of a credential authorises nothing |
-| **compliance-risk** | KYC/KYB/KYA tiers, limits, screening, monitoring, fraud scoring, rarity detection | Let a customer decide their own tier; sit on the money path |
+| **compliance-risk** | KYC/KYB/KYA tiers, limits, fuzzy screening, monitoring, fraud scoring, rare-event situation awareness | Let a customer decide their own tier; sit on the money path |
 | **platform-control-bff** | Operator authentication, RBAC, maker–checker, hash-chained audit | Allow self-approval; permit a balance edit |
 | **voice-intent** | Natural language → typed intent | Emit anything other than a proposal |
 | **adapters** | Provider rails, HMAC-signed, replay-protected | Hold general-purpose credentials |
@@ -343,12 +349,14 @@ contains no mistakes is either very young or not telling you everything.
 | Area | Status |
 | --- | --- |
 | Ledger, double entry, holds, receipts | Built, tested against a real database |
-| Bounded authority + conformance suite | Built; 3 implementations pass; vectors reproduced in a second language |
+| Bounded authority + conformance suite | Built and **published as a standalone product** ([BoundedAuth-AI](https://github.com/FrankAsanteVanLaarhoven/BoundedAuth-AI)); 3 implementations pass; 10 vectors reproduced in a second language; red-teamed |
 | Passkey payment, browser | **Demonstrated end to end** with a real WebAuthn ceremony |
 | Passkey payment, **mobile device** | **Not yet.** Needs an Expo development build |
 | Operator console, maker–checker, audit | Built and demonstrated with two operators |
-| Compliance tiers, limits, screening | Built. **Screening list is a fixture**, not a licensed list |
-| Fraud detection | Built; benchmarked. **Accuracy unmeasured** — no labelled production data |
+| Compliance tiers, limits | Built, race-safe (per-subject serialised decisions) |
+| Screening | **Fuzzy** matching (plural / typo / reordering caught) behind a licensed-provider interface. The list itself is still a **fixture**, not a licensed feed |
+| Money-path settlement | **Capture-before-rail** reorder done; hold released on capture failure; rail idempotent (H1/H2/H8 closed for the internal-wallet model) |
+| Fraud detection + situation awareness | Built; benchmarked. Rare-event **situation awareness** (novelty, clustering, priority, narrative) is advisory-only and wired into live decisions. **Accuracy unmeasured** — no labelled production data |
 | Provider rails | **Simulated.** No live provider integration |
 | Console/portal reads | Partly **in-memory seed data** |
 | Service-to-service auth | **Shared token**, not mTLS or workload identity |
