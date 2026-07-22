@@ -218,6 +218,18 @@ func (s *server) mintWithPasskey(w http.ResponseWriter, r *http.Request) {
 			"error": "assertion_failed", "message": err.Error()})
 		return
 	}
+	// A signature-counter regression means the counter did not advance past what
+	// was last stored, which is how a cloned authenticator is detected. It was
+	// previously recorded and then ignored — the grant was minted anyway and the
+	// warning merely echoed. For a payment authorisation this must fail closed:
+	// refuse the grant, and do not lower the stored counter to the clone's value.
+	if cred.Authenticator.CloneWarning {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error":   "authenticator_clone_suspected",
+			"message": "The authenticator's signature counter did not advance; authorisation is refused.",
+		})
+		return
+	}
 	if err := s.store.UpdateSignCount(ctx, cred); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

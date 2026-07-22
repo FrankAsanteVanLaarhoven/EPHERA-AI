@@ -23,9 +23,10 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -106,11 +107,13 @@ func (s *server) require(w http.ResponseWriter, r *http.Request, perm authz.Perm
 	if err != nil {
 		// No authenticated actor, so there is nobody to attribute this to. It is
 		// recorded against the anonymous caller rather than silently dropped.
-		_, _ = s.store.Append(r.Context(), store.AuditEntry{
+		if _, aerr := s.store.Append(r.Context(), store.AuditEntry{
 			Actor: "anonymous", ActorMethod: "none", SessionID: "none",
 			Action: action, Target: target, Outcome: "denied",
 			Detail: map[string]any{"reason": err.Error()},
-		})
+		}); aerr != nil {
+			log.Printf("AUDIT FAILURE: could not record anonymous %s denial: %v", action, aerr)
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{
 			"error": "authentication_required", "message": err.Error()})
 		return principal{}, false
@@ -126,7 +129,7 @@ func (s *server) require(w http.ResponseWriter, r *http.Request, perm authz.Perm
 }
 
 func (s *server) audit(ctx context.Context, pr principal, action, target, outcome string, detail map[string]any, changeID *string) {
-	_, _ = s.store.Append(ctx, store.AuditEntry{
+	if _, err := s.store.Append(ctx, store.AuditEntry{
 		Actor:           pr.Session.Subject,
 		ActorMethod:     string(pr.Session.Method),
 		SessionID:       pr.Session.ID,
@@ -135,7 +138,14 @@ func (s *server) audit(ctx context.Context, pr principal, action, target, outcom
 		Outcome:         outcome,
 		Detail:          detail,
 		ChangeRequestID: changeID,
-	})
+	}); err != nil {
+		// A dropped audit entry breaks the "every attempt is audited"
+		// guarantee. After the retries inside Append this should be rare, but
+		// if it still happens it must be loud rather than silent — a missing
+		// audit row is exactly what an attacker would want to go unnoticed.
+		log.Printf("AUDIT FAILURE: could not record %s/%s by %s: %v",
+			action, outcome, pr.Session.Subject, err)
+	}
 }
 
 // withCORS allows exactly the configured console origins. It is an allowlist

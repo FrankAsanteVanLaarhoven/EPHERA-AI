@@ -114,6 +114,16 @@ func (s *server) operatorSession(w http.ResponseWriter, r *http.Request) {
 			"error": "assertion_failed", "message": err.Error()})
 		return
 	}
+	// A counter regression means a possible cloned authenticator. An operator
+	// login is at least as sensitive as a payment, so it fails closed too: no
+	// session is minted and the stored counter is not lowered.
+	if cred.Authenticator.CloneWarning {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error":   "authenticator_clone_suspected",
+			"message": "The authenticator's signature counter did not advance; login is refused.",
+		})
+		return
+	}
 	if err := s.store.UpdateSignCount(ctx, cred); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

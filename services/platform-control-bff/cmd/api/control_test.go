@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -400,7 +400,6 @@ func TestExpiredSessionRefused(t *testing.T) {
 		t.Fatalf("expired session returned %d, expected 401", code)
 	}
 }
-
 
 // D-17. Applying an approved change must reach the service that owns the thing
 // being changed, carrying the approval it was authorised under.

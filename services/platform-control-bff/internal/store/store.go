@@ -11,16 +11,17 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
-	ErrNotFound      = errors.New("not found")
-	ErrSelfApproval  = errors.New("an operator cannot approve their own change")
-	ErrNotPending    = errors.New("change request is not pending")
-	ErrExpired       = errors.New("change request has expired")
-	ErrNotApproved   = errors.New("change request has not been approved")
-	ErrSuspended     = errors.New("operator is suspended")
+	ErrNotFound     = errors.New("not found")
+	ErrSelfApproval = errors.New("an operator cannot approve their own change")
+	ErrNotPending   = errors.New("change request is not pending")
+	ErrExpired      = errors.New("change request has expired")
+	ErrNotApproved  = errors.New("change request has not been approved")
+	ErrSuspended    = errors.New("operator is suspended")
 )
 
 // GenesisHash begins the audit chain. It is a constant rather than an empty
@@ -204,19 +205,58 @@ type AuditEntry struct {
 	ChangeRequestID *string
 }
 
-// Append writes one audit record, chained to the previous one. Both the read of
-// the tip and the insert happen in a single serialisable transaction, so two
-// concurrent writers cannot produce a fork.
+// Append writes an audit entry, chained to the previous one, retrying on a
+// serialization failure.
+//
+// The append reads the tail hash and inserts the next link in one Serializable
+// transaction, so two concurrent appends conflict: one commits and the other
+// fails with 40001. That failure was previously returned and then swallowed by
+// the caller, so under contention audit entries were silently dropped — and an
+// attacker able to induce contention could suppress them, defeating the
+// "every attempt is audited" guarantee. Retrying the conflicting append makes
+// it wait for the winner and chain onto it instead of being lost.
 func (s *Store) Append(ctx context.Context, e AuditEntry) (string, error) {
+	const maxAttempts = 8
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		hash, err := s.appendOnce(ctx, e)
+		if err == nil {
+			return hash, nil
+		}
+		lastErr = err
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "40001" {
+			continue // serialization failure — another append won the race; retry
+		}
+		return "", err
+	}
+	return "", fmt.Errorf("audit append failed after %d attempts: %w", maxAttempts, lastErr)
+}
+
+func (s *Store) appendOnce(ctx context.Context, e AuditEntry) (string, error) {
 	detail, err := json.Marshal(e.Detail)
 	if err != nil {
 		return "", err
 	}
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	// An append-only hash chain is inherently serial: each entry links to the
+	// current tip, so two appends cannot proceed at once. A transaction-scoped
+	// advisory lock makes that explicit — concurrent appends queue in an orderly
+	// line. The transaction is Read Committed rather than Serializable on
+	// purpose: a Serializable snapshot is fixed before the lock is acquired, so a
+	// waiter reads a stale tip and still aborts with 40001 at commit, which is
+	// how audit entries were being dropped under contention. Under Read
+	// Committed the tip read below runs after the lock is held and sees the
+	// previous appender's committed row, so there is no conflict to retry. The
+	// lock is released when this transaction commits or rolls back.
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('ephera_audit_log'))`); err != nil {
+		return "", err
+	}
 
 	prev := GenesisHash
 	err = tx.QueryRow(ctx, `SELECT entry_hash FROM audit_log ORDER BY seq DESC LIMIT 1`).Scan(&prev)
