@@ -1,0 +1,260 @@
+// EPHERA compliance-risk.
+//
+// Owns customer verification state, the limits that follow from it, screening,
+// and the cases that come out of both.
+//
+// It exists because a customer's KYC tier lived in device storage and the
+// customer could promote themselves to "verified" (D-33), and because the
+// daily and new-recipient limits existed only as numbers on the device that the
+// send path never consulted (D-39).
+//
+// Two rules shape the surface:
+//
+//   - A tier is a statement about verified evidence, so the subject of a
+//     verification can never be the party that decided it.
+//   - Every decision carries its reasons. A refusal has to be explainable to
+//     the customer refused and to an examiner asking why.
+package main
+
+import (
+	"context"
+	"crypto/subtle"
+	"encoding/json"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+
+	"github.com/ephera/compliance-risk/internal/risk"
+	"github.com/ephera/compliance-risk/internal/store"
+)
+
+type server struct {
+	store        *store.Store
+	serviceToken string
+}
+
+func main() {
+	addr := env("COMPLIANCE_HTTP_ADDR", ":8095")
+
+	ctx := context.Background()
+	st, err := store.New(ctx, env("COMPLIANCE_DATABASE_URL",
+		"postgres://ephera:ephera_dev_only@localhost:5433/ephera_compliance?sslmode=disable"))
+	if err != nil {
+		log.Fatalf("compliance db: %v", err)
+	}
+	defer st.Close()
+
+	token := os.Getenv("COMPLIANCE_SERVICE_TOKEN")
+	if token == "" {
+		log.Printf("WARNING: COMPLIANCE_SERVICE_TOKEN is not set. " +
+			"Calls will be refused until a caller credential is configured.")
+	}
+
+	s := &server{store: st, serviceToken: token}
+	log.Printf("EPHERA compliance-risk on %s", addr)
+	if err := http.ListenAndServe(addr, s.routes()); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func (s *server) routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", s.health)
+	mux.HandleFunc("GET /v1/customers/{subject}", s.serviceOnly(s.getCustomer))
+	mux.HandleFunc("POST /v1/customers/{subject}/tier", s.serviceOnly(s.setTier))
+	mux.HandleFunc("POST /v1/decisions", s.serviceOnly(s.decide))
+	mux.HandleFunc("GET /v1/cases", s.serviceOnly(s.listCases))
+	mux.HandleFunc("POST /v1/cases/{id}/close", s.serviceOnly(s.closeCase))
+	return mux
+}
+
+// serviceOnly authenticates the caller. Compliance state is among the most
+// sensitive data here, so there is no unauthenticated route but health, and no
+// token configured means everything is refused.
+func (s *server) serviceOnly(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		presented := strings.TrimSpace(r.Header.Get("X-Ephera-Service-Token"))
+		if s.serviceToken == "" || presented == "" ||
+			subtle.ConstantTimeCompare([]byte(presented), []byte(s.serviceToken)) != 1 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{
+				"error": "caller_not_authenticated",
+			})
+			return
+		}
+		h(w, r)
+	}
+}
+
+func (s *server) health(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok", "service": "compliance-risk",
+		"screeningList": "SANDBOX-FIXTURE (not a licensed list)",
+	})
+}
+
+func (s *server) getCustomer(w http.ResponseWriter, r *http.Request) {
+	c, err := s.store.EnsureCustomer(r.Context(), r.PathValue("subject"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+type tierRequest struct {
+	Tier        string `json:"tier"`
+	DecidedBy   string `json:"decidedBy"`
+	EvidenceRef string `json:"evidenceRef"`
+	Reason      string `json:"reason"`
+}
+
+func (s *server) setTier(w http.ResponseWriter, r *http.Request) {
+	subject := r.PathValue("subject")
+	var req tierRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, err := s.store.EnsureCustomer(r.Context(), subject); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	c, err := s.store.SetTier(r.Context(), subject, req.Tier, req.DecidedBy, req.EvidenceRef, req.Reason)
+	switch {
+	case err == store.ErrSelfVerification:
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error":   "self_verification_refused",
+			"message": "A customer cannot decide their own verification tier.",
+		})
+		return
+	case err == store.ErrUnknownTier:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown_tier"})
+		return
+	case err != nil:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+type decisionRequest struct {
+	Subject       string `json:"subject"`
+	AmountMinor   int64  `json:"amountMinor"`
+	Currency      string `json:"currency"`
+	RecipientName string `json:"recipientName"`
+}
+
+// decide is what the payment orchestrator calls before a transfer is prepared.
+func (s *server) decide(w http.ResponseWriter, r *http.Request) {
+	var req decisionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Subject == "" || req.RecipientName == "" || req.Currency == "" {
+		http.Error(w, "subject, recipientName and currency are required", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+
+	customer, err := s.store.EnsureCustomer(ctx, req.Subject)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	hits, err := s.store.Screen(ctx, req.RecipientName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	spent, err := s.store.SpentToday(ctx, req.Subject)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	known, err := s.store.KnownRecipient(ctx, req.Subject, req.RecipientName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	in := risk.Input{
+		Subject:         req.Subject,
+		CustomerStatus:  customer.Status,
+		Tier:            customer.Limits,
+		AmountMinor:     req.AmountMinor,
+		Currency:        req.Currency,
+		RecipientName:   req.RecipientName,
+		SpentTodayMinor: spent,
+		KnownRecipient:  known,
+		ScreeningHits:   hits,
+	}
+	decision := risk.Evaluate(in)
+
+	// Every decision is recorded, allow or refuse. The allowed ones are also
+	// what the daily total and the known-recipient check are computed from.
+	if err := s.store.RecordDecision(ctx, in, decision); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// A held payment raises a case, so a human has something to work from
+	// rather than the customer simply being stuck.
+	if decision.Outcome == risk.Review {
+		if _, err := s.store.OpenCase(ctx, req.Subject, strings.Join(decision.Reasons, "; ")); err != nil {
+			log.Printf("could not open review case for %s: %v", req.Subject, err)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"outcome":             string(decision.Outcome),
+		"reasons":             decision.Reasons,
+		"tier":                customer.Tier,
+		"remainingDailyMinor": decision.RemainingDailyMinor,
+	})
+}
+
+func (s *server) listCases(w http.ResponseWriter, r *http.Request) {
+	cases, err := s.store.ListOpenCases(r.Context(), 50)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": cases})
+}
+
+type closeRequest struct {
+	Status   string `json:"status"`
+	ClosedBy string `json:"closedBy"`
+	Note     string `json:"note"`
+}
+
+func (s *server) closeCase(w http.ResponseWriter, r *http.Request) {
+	var req closeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.ClosedBy == "" {
+		http.Error(w, "closedBy is required", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.CloseCase(r.Context(), r.PathValue("id"), req.Status, req.ClosedBy, req.Note); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": req.Status})
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func env(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}

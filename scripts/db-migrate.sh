@@ -24,6 +24,7 @@ case "$SERVICE" in
   ledger) DBNAME="${2:-ephera_ledger}" ;;
   identity-access) DBNAME="${2:-ephera_identity}" ;;
   platform-control-bff) DBNAME="${2:-ephera_operations}" ;;
+  compliance-risk) DBNAME="${2:-ephera_compliance}" ;;
 esac
 MIGDIR="$ROOT/services/$SERVICE/migrations"
 if [ ! -d "$MIGDIR" ]; then
@@ -40,6 +41,7 @@ case "$SERVICE" in
   ledger) DB_URL="${LEDGER_DATABASE_URL:-}" ;;
   identity-access) DB_URL="${IDENTITY_DATABASE_URL:-}" ;;
   platform-control-bff) DB_URL="${CONTROL_DATABASE_URL:-}" ;;
+  compliance-risk) DB_URL="${COMPLIANCE_DATABASE_URL:-}" ;;
   *) DB_URL="" ;;
 esac
 

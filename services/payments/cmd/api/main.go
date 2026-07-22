@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ephera/payments/internal/compliance"
 	"github.com/ephera/payments/internal/ledgerclient"
 	"github.com/ephera/payments/internal/workflow"
 	"github.com/google/uuid"
@@ -16,8 +17,9 @@ import (
 )
 
 type server struct {
-	tc     client.Client
-	ledger *ledgerclient.Client
+	tc         client.Client
+	ledger     *ledgerclient.Client
+	compliance *compliance.Client
 }
 
 type quoteRequest struct {
@@ -51,7 +53,11 @@ func main() {
 	}
 	defer tc.Close()
 
-	s := &server{tc: tc, ledger: ledgerclient.New(ledgerURL)}
+	s := &server{
+		tc:         tc,
+		ledger:     ledgerclient.New(ledgerURL),
+		compliance: compliance.New(env("COMPLIANCE_URL", "http://localhost:8095")),
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /v1/quotes", s.quote)
@@ -194,6 +200,39 @@ func (s *server) prepareTransfer(w http.ResponseWriter, r *http.Request) {
 	}
 	applyDefaults(&req)
 
+	// Ask compliance before the customer is asked to authorise anything.
+	// Refusing after a passkey prompt would mean the customer approved
+	// something the platform was never going to do.
+	decision, err := s.compliance.Decide(r.Context(), compliance.Request{
+		Subject:       req.FromExternalRef,
+		AmountMinor:   req.AmountMinor,
+		Currency:      req.Currency,
+		RecipientName: req.RecipientName,
+	})
+	if err != nil {
+		// No decision is not permission. A compliance service that cannot be
+		// reached fails the payment closed.
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error":   "compliance_unavailable",
+			"message": err.Error(),
+		})
+		return
+	}
+	if decision.Outcome != "allow" {
+		status := http.StatusForbidden
+		if decision.Outcome == "review" {
+			status = http.StatusAccepted
+		}
+		writeJSON(w, status, map[string]any{
+			"error":    "compliance_" + decision.Outcome,
+			"outcome":  decision.Outcome,
+			"reasons":  decision.Reasons,
+			"tier":     decision.Tier,
+			"message":  complianceMessage(decision.Outcome),
+		})
+		return
+	}
+
 	prepared := preparedTransfer{
 		TransferID:      "tx_" + uuid.NewString(),
 		IdempotencyKey:  req.IdempotencyKey,
@@ -242,6 +281,16 @@ func feeFor(rail string, amountMinor int64) int64 {
 			return 50
 		}
 		return 0
+	}
+}
+
+// complianceMessage says what happened in terms a customer can act on.
+func complianceMessage(outcome string) string {
+	switch outcome {
+	case "review":
+		return "This payment is held for review. We will be in touch; the money has not moved."
+	default:
+		return "This payment cannot be made. See the reasons for why."
 	}
 }
 

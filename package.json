@@ -35,16 +35,19 @@
     "db:migrate": "./scripts/db-migrate.sh",
     "db:migrate:identity": "./scripts/db-migrate.sh identity-access",
     "db:migrate:control": "./scripts/db-migrate.sh platform-control-bff",
+    "db:migrate:compliance": "./scripts/db-migrate.sh compliance-risk",
     "db:psql": "docker compose -f infrastructure/docker-compose.yml exec postgres psql -U ephera -d ephera_ledger",
     "dev:payments-api": "./scripts/run-payments-api.sh",
     "dev:payments-worker": "./scripts/run-payments-worker.sh",
     "dev:ledger": "./scripts/run-ledger-api.sh",
     "dev:identity": "./scripts/run-identity-access.sh",
+    "dev:compliance": "./scripts/run-compliance-risk.sh",
     "dev:voice-intent": "./scripts/run-voice-intent.sh",
     "test:go": "cd services/payments && go test ./...",
     "test:voice": "cd services/voice-intent && python3 -m pytest -q || python3 -c 'import test_compiler; test_compiler.test_send_ama(); test_compiler.test_freeze(); test_compiler.test_never_authorises(); test_compiler.test_low_confidence_without_amount(); print(\"voice tests ok\")'",
     "test:authgrant": "cd services/authgrant && go test ./...",
-    "test:control": "cd services/platform-control-bff && go test ./..."
+    "test:control": "cd services/platform-control-bff && go test ./...",
+    "test:compliance": "cd services/compliance-risk && go test ./..."
   },
   "engines": {
     "node": ">=20"

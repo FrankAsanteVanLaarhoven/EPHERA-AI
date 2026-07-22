@@ -2,3 +2,4 @@
 CREATE DATABASE ephera_identity;
 CREATE DATABASE ephera_operations;
 CREATE DATABASE ephera_analytics;
+CREATE DATABASE ephera_compliance;

@@ -102,26 +102,21 @@ export default function IdentityScreen({ go, back }: { go: Go; back: () => void 
       );
       return;
     }
-    // Simulate approval path for demo when pending docs are ok
-    const nextTier = TIER_ORDER[idx + 1];
-    if (id.tier === "basic") {
-      const next = await patchIdentity({ tier: "verified" });
-      setId(next);
-      await updateProfile({ kycTier: "verified" });
-      void brandHaptic("paymentCompleted");
-      Alert.alert("Verified", "Identity upgraded to Verified.");
-      return;
-    }
-    // premium path
-    const next = await patchIdentity({
-      tier: nextTier,
-      docs: id.docs.map((d) =>
-        d.id === "sof" ? { ...d, status: "pending", note: "Under review" } : d,
-      ),
-    });
-    setId(next);
-    void brandHaptic("intentUnderstood");
-    Alert.alert("Review started", "Premium upgrade submitted for human review.");
+    // A customer cannot verify themselves.
+    //
+    // This screen used to write the new tier straight to device storage, so a
+    // tap upgraded the customer to "verified" with no evidence and no decision
+    // by anyone (D-33). Tier is now owned by compliance-risk, which records who
+    // decided it and on what evidence, and refuses a decision made by the
+    // subject of the verification -- in code and by a database constraint.
+    //
+    // The device submits documents and waits. It does not decide.
+    Alert.alert(
+      "Submitted for review",
+      "Your documents have been submitted. A reviewer decides your verification " +
+        "level; it cannot be set from this device.",
+    );
+    return;
   }
 
   async function requestHumanReview() {

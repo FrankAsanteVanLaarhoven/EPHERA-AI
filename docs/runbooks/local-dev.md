@@ -17,6 +17,7 @@
 | Ledger API | **8092** |
 | identity-access | **8093** |
 | platform-control-bff | **8094** |
+| compliance-risk | **8095** |
 | Merchant web (dev) | 3005 |
 | Consumer PWA (dev) | 3006 |
 | Super Admin console (dev) | **3007** |
@@ -72,6 +73,7 @@ MinIO console: http://localhost:9001 (ephera / ephera_dev_only)
 npm run db:migrate
 npm run db:migrate:identity
 npm run db:migrate:control
+npm run db:migrate:compliance
 npm run dev:ledger            # :8092 authoritative balances
 npm run dev:payments-worker
 npm run dev:payments-api      # :8090
@@ -179,3 +181,19 @@ go through the payment orchestrator, operators through the control plane.
 
 The shared token is a **sandbox placeholder**. Real service identity is mutual
 TLS or workload identity, which this codebase cannot provide — that is G8.
+
+## Compliance
+
+`compliance-risk` owns customer verification, the limits that follow from it,
+screening and review cases. The payment orchestrator asks it at prepare, before
+the customer is asked to authorise anything — refusing after a passkey prompt
+would mean the customer approved something the platform was never going to do.
+
+A customer starts **unverified** and cannot send. A tier is raised only by a
+decision that records who made it and on what evidence, and the subject of a
+verification can never be the decider — enforced in code and by a database
+constraint.
+
+The screening list is a **sandbox fixture with fictional entries**, and matching
+is case-folded exact comparison. A real deployment consumes a licensed list with
+fuzzy matching; nothing here should be mistaken for one.

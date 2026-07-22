@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export COMPLIANCE_SERVICE_TOKEN="${COMPLIANCE_SERVICE_TOKEN:-sandbox-service-token}"
+export COMPLIANCE_URL="${COMPLIANCE_URL:-http://localhost:8095}"
 # The ledger authenticates its callers; services present this token.
 export LEDGER_SERVICE_TOKEN="${LEDGER_SERVICE_TOKEN:-sandbox-service-token}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
