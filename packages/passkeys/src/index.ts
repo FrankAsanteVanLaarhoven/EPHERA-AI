@@ -53,13 +53,23 @@ export class MockPasskeys implements PasskeyModule {
 }
 
 /**
- * Placeholder for native bridge. Until Expo module is linked, falls back to mock
- * only when explicitly allowed (sandbox).
+ * Native bridge placeholder.
+ *
+ * The mock produces a reference the ledger no longer accepts (G2-A), so it can
+ * no longer authorise anything on its own — it is only an on-device confirmation
+ * affordance. It is therefore off by default: a caller must ask for it
+ * explicitly, which keeps "did we accidentally ship the mock" answerable by
+ * grep rather than by inspection.
+ *
+ * The real authorisation on browser surfaces is a WebAuthn ceremony (see
+ * ./webauthn and the consumer surface). Native passkeys via an Expo module are
+ * still outstanding — until then this returns an unavailable module rather than
+ * silently substituting the mock.
  */
 export function createPasskeyModule(opts?: { allowMock?: boolean }): PasskeyModule {
   // Native module name reserved: EpheraPasskeys
   // const Native = TurboModuleRegistry.get('EpheraPasskeys')
-  if (opts?.allowMock !== false) {
+  if (opts?.allowMock === true) {
     return new MockPasskeys();
   }
   return {
@@ -77,3 +87,5 @@ export function createPasskeyModule(opts?: { allowMock?: boolean }): PasskeyModu
     },
   };
 }
+
+export * from "./webauthn";

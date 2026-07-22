@@ -20,6 +20,7 @@ import { brandHaptic } from "../lib/brand-system/haptics";
 import { brandSonic } from "../lib/brand-system/sonic";
 import { useTheme } from "../lib/theme-context";
 import { PAYMENTS_URL } from "../lib/config";
+import { prepareTransfer, requestAuthorisationGrant } from "../lib/api";
 import type { Screen as Route } from "../lib/navigation";
 import { radii, space } from "../theme";
 
@@ -149,26 +150,59 @@ export default function SendScreen({
     void brandHaptic("authorisationRequired");
     void brandSonic("secureAuth");
     try {
-      const transferId = `tx_local_${Date.now()}`;
-      const auth = await passkeys.authorise({
-        transferId,
+      // The transfer is prepared first so the transfer id, recipient account
+      // and fee are fixed before anything is authorised. The grant is then
+      // bound to exactly those values, so what the user approved is what the
+      // ledger posts (ADR 0002).
+      //
+      // The idempotency key is derived from the intent and the amount, not from
+      // the clock. A retry must reuse the same key, otherwise it becomes a
+      // second transfer (D-34).
+      const prepared = await prepareTransfer({
         amountMinor: intent.amount.amountMinor,
         currency: intent.amount.currency,
         recipientName: intent.recipient.displayName,
-        challengeSummary: `Send ${formatMoney(intent.amount.amountMinor, intent.amount.currency)} to ${intent.recipient.displayName}`,
+        recipientHint: intent.recipient.accountHint,
+        idempotencyKey: `idem_${intent.id}_${intent.amount.amountMinor}`,
+      });
+      if (!prepared) {
+        setStatus("Could not prepare the transfer.");
+        return;
+      }
+      const transferId = prepared.transferId;
+
+      // Device authorisation. The mock returns a reference the ledger no longer
+      // accepts; it stays here as the user-facing confirmation step until real
+      // passkey verification lands (G2-B).
+      const auth = await passkeys.authorise({
+        transferId,
+        amountMinor: prepared.amountMinor,
+        currency: prepared.currency,
+        recipientName: intent.recipient.displayName,
+        challengeSummary: `Send ${formatMoney(prepared.amountMinor, prepared.currency)} to ${intent.recipient.displayName} (fee ${formatMoney(prepared.feeMinor, prepared.currency)})`,
       });
       if (!auth.ok) {
         setStatus(`Authorisation failed: ${auth.error}`);
         return;
       }
+
+      const grant = await requestAuthorisationGrant(prepared);
+      if (!grant) {
+        setStatus("Authorisation grant refused.");
+        return;
+      }
+
       const body = {
-        amountMinor: intent.amount.amountMinor,
-        currency: intent.amount.currency,
+        transferId: prepared.transferId,
+        amountMinor: prepared.amountMinor,
+        currency: prepared.currency,
         recipientName: intent.recipient.displayName,
         recipientHint: intent.recipient.accountHint,
-        rail: "mobile-money-sim",
-        authorisationRef: auth.authorisationRef,
-        idempotencyKey: `idem_${intent.id}_${Date.now()}`,
+        fromExternalRef: prepared.fromExternalRef,
+        toExternalRef: prepared.toExternalRef,
+        rail: prepared.rail,
+        authorisationRef: grant,
+        idempotencyKey: prepared.idempotencyKey,
       };
       try {
         const res = await fetch(`${PAYMENTS_URL}/v1/transfers`, {
@@ -182,7 +216,7 @@ export default function SendScreen({
             id: transferId,
             kind: "domestic_transfer",
             payload: body,
-            authorisationRef: auth.authorisationRef,
+            authorisationRef: grant,
           });
           setStatus(data.error ?? "Queued offline as pending.");
           setStep("done");
@@ -207,7 +241,7 @@ export default function SendScreen({
           id: transferId,
           kind: "domestic_transfer",
           payload: body,
-          authorisationRef: auth.authorisationRef,
+          authorisationRef: grant,
         });
         setStatus("Network unavailable — authorised transfer queued offline.");
         setStep("done");

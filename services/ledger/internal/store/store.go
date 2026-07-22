@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"time"
@@ -16,10 +17,12 @@ var (
 	ErrInsufficientFunds = errors.New("insufficient funds")
 	ErrFrozen            = errors.New("account frozen")
 	ErrUnauthorised      = errors.New("missing authorisation")
+	ErrInvalidRequest    = errors.New("invalid request")
 )
 
 type Store struct {
-	pool *pgxpool.Pool
+	pool          *pgxpool.Pool
+	authPublicKey ed25519.PublicKey
 }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {
@@ -67,7 +70,21 @@ func (s *Store) GetByExternalRef(ctx context.Context, ref string) (Account, erro
 	return a, nil
 }
 
+// FreezeAuthority records who ordered a freeze and under which approved change.
+// A freeze is a customer-visible restriction, so who ordered it and why has to
+// be answerable later (ADR 0007).
+type FreezeAuthority struct {
+	OperatorSubject string
+	ChangeRequestID string
+	Method          string
+}
+
 func (s *Store) Freeze(ctx context.Context, externalRef, reason string) (Account, error) {
+	return s.FreezeBy(ctx, externalRef, reason, FreezeAuthority{Method: "passkey"})
+}
+
+// FreezeBy freezes an account and attributes it.
+func (s *Store) FreezeBy(ctx context.Context, externalRef, reason string, by FreezeAuthority) (Account, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return Account{}, err
@@ -87,12 +104,31 @@ func (s *Store) Freeze(ctx context.Context, externalRef, reason string) (Account
 	if err != nil {
 		return Account{}, err
 	}
-	// audit row via authorisation_evidence with freeze pseudo-transfer
-	_, _ = tx.Exec(ctx, `
-		INSERT INTO authorisation_evidence (transfer_id, method, policy_decision)
-		VALUES ($1, 'passkey', $2::jsonb)
+	// Audit row via authorisation_evidence with freeze pseudo-transfer.
+	// Evidence writes are not best-effort (ADR 0007): a freeze that cannot be
+	// evidenced does not commit. Previously this error was discarded (D-22).
+	method := by.Method
+	if method == "" {
+		method = "passkey"
+	}
+	var changeID, operator *string
+	if by.ChangeRequestID != "" {
+		changeID = &by.ChangeRequestID
+	}
+	if by.OperatorSubject != "" {
+		operator = &by.OperatorSubject
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO authorisation_evidence
+			(transfer_id, method, policy_decision, change_request_id, operator_subject)
+		VALUES ($1, $2, $3::jsonb, $4, $5)
 	`, "freeze:"+externalRef+":"+time.Now().UTC().Format(time.RFC3339Nano),
-		fmt.Sprintf(`{"action":"freeze","reason":%q}`, reason))
+		method,
+		fmt.Sprintf(`{"action":"freeze","reason":%q}`, reason),
+		changeID, operator)
+	if err != nil {
+		return Account{}, fmt.Errorf("freeze evidence: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Account{}, err
 	}
@@ -125,6 +161,10 @@ type HoldRequest struct {
 
 // PlaceHold reserves funds on the sender (hold_minor++). Idempotent.
 func (s *Store) PlaceHold(ctx context.Context, req HoldRequest) (string, error) {
+	if err := req.validate(); err != nil {
+		return "", err
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -196,8 +236,17 @@ type TransferRequest struct {
 
 // CaptureTransfer releases hold and posts double-entry transfer + optional fee.
 func (s *Store) CaptureTransfer(ctx context.Context, req TransferRequest) (string, error) {
-	if req.AuthorisationRef == "" {
-		return "", ErrUnauthorised
+	if err := req.validate(); err != nil {
+		return "", err
+	}
+
+	// The ledger is the authority, so it verifies the authorisation itself
+	// rather than trusting that an upstream service did (ADR 0002). Verification
+	// is offline: a signature check against the identity service's public key,
+	// plus a check that the grant is bound to exactly this transaction.
+	grant, err := s.verifyGrant(req)
+	if err != nil {
+		return "", err
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -320,10 +369,29 @@ func (s *Store) CaptureTransfer(ctx context.Context, req TransferRequest) (strin
 		}
 	}
 
+	// Consume the grant in the same transaction as the postings. A replay
+	// either finds this row already present or collides on the primary key,
+	// and in both cases the whole transfer rolls back. There is no window in
+	// which a replayed grant can post.
 	_, err = tx.Exec(ctx, `
-		INSERT INTO authorisation_evidence (transfer_id, method, policy_decision)
-		VALUES ($1, 'passkey', $2::jsonb)
-	`, req.TransferID, fmt.Sprintf(`{"authorisationRef":%q}`, req.AuthorisationRef))
+		INSERT INTO authorisation_grants
+			(jti, subject, method, binding_digest, transfer_id, journal_entry_id, issued_at, expires_at)
+		VALUES ($1,$2,$3,$4,$5,$6, to_timestamp($7), to_timestamp($8))
+	`, grant.ID, grant.Subject, string(grant.Method), grant.Binding, req.TransferID, jeID,
+		grant.IssuedAt, grant.ExpiresAt)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return "", ErrGrantAlreadyUsed
+		}
+		return "", err
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO authorisation_evidence (transfer_id, method, policy_decision, grant_jti)
+		VALUES ($1, $2, $3::jsonb, $4)
+	`, req.TransferID, string(grant.Method),
+		fmt.Sprintf(`{"grantId":%q,"subject":%q,"binding":%q}`, grant.ID, grant.Subject, grant.Binding),
+		grant.ID)
 	if err != nil {
 		return "", err
 	}
@@ -403,4 +471,43 @@ func (s *Store) ReleaseHold(ctx context.Context, holdID string) error {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// UnfreezeBy lifts a freeze and attributes it. Lifting a restriction is the
+// more dangerous direction, so it is evidenced the same way as applying one.
+func (s *Store) UnfreezeBy(ctx context.Context, externalRef string, by FreezeAuthority) (Account, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Account{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE accounts SET status='active', updated_at=now() WHERE external_ref=$1 AND status='frozen'`,
+		externalRef); err != nil {
+		return Account{}, err
+	}
+	var changeID, operator *string
+	if by.ChangeRequestID != "" {
+		changeID = &by.ChangeRequestID
+	}
+	if by.OperatorSubject != "" {
+		operator = &by.OperatorSubject
+	}
+	method := by.Method
+	if method == "" {
+		method = "passkey"
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO authorisation_evidence
+			(transfer_id, method, policy_decision, change_request_id, operator_subject)
+		VALUES ($1, $2, $3::jsonb, $4, $5)
+	`, "unfreeze:"+externalRef+":"+time.Now().UTC().Format(time.RFC3339Nano),
+		method, `{"action":"unfreeze"}`, changeID, operator); err != nil {
+		return Account{}, fmt.Errorf("unfreeze evidence: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Account{}, err
+	}
+	return s.GetByExternalRef(ctx, externalRef)
 }

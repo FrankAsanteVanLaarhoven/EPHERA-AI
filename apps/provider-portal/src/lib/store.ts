@@ -9,7 +9,6 @@ import {
   createLinkToken,
   createSwiftMessage,
   exchangePublicToken,
-  issueApiKey,
   listInstitutions,
 } from "@ephera/connect-layer";
 
@@ -22,8 +21,8 @@ function uid(prefix: string) {
 const applications: ProviderApplication[] = [
   {
     id: "app_seed_mtn",
-    legalName: "MTN Mobile Money Ghana Ltd (sandbox demo)",
-    tradingName: "MTN MoMo GH",
+    legalName: "Sandbox Mobile Money Ltd (fictional)",
+    tradingName: "Sandbox MoMo GH",
     category: "mobile_money",
     countries: ["GH"],
     primaryCountry: "GH",
@@ -35,7 +34,7 @@ const applications: ProviderApplication[] = [
     contactPhone: "+233200000000",
     servicesOffered: ["cash_in", "cash_out", "p2p", "merchant"],
     description: "Seed provider for Super Admin monitoring demos.",
-    status: "approved",
+    status: "draft",
     createdAt: new Date(Date.now() - 86400000 * 10).toISOString(),
     updatedAt: new Date(Date.now() - 86400000 * 2).toISOString(),
     documents: [
@@ -89,6 +88,17 @@ export const providerStore = {
   connections,
   swiftMessages,
   credentials,
+
+  /** Applications owned by a subject. Used for every provider-facing read. */
+  listForOwner(subject: string) {
+    return applications.filter((a) => a.ownerSubject === subject);
+  },
+
+  /** Ownership check for a single record. */
+  ownedBy(id: string, subject: string) {
+    const app = applications.find((a) => a.id === id);
+    return app?.ownerSubject === subject ? app : null;
+  },
 
   list() {
     return applications;
@@ -161,6 +171,14 @@ export const providerStore = {
     return app;
   },
 
+  /**
+   * Record an approval decision.
+   *
+   * Credential issuance used to happen here, inline with the status change, and
+   * returned the raw secret to the caller (D-09). It has moved out: approving a
+   * provider is a control-plane change requiring a second operator, and the
+   * secret is delivered once through a channel that is not this response body.
+   */
   setAdminStatus(
     id: string,
     status: ProviderApplication["status"],
@@ -171,16 +189,6 @@ export const providerStore = {
     app.status = status;
     app.adminNotes.push(note);
     app.updatedAt = new Date().toISOString();
-    if (status === "approved") {
-      const { credential, rawSecret } = issueApiKey(id, ["payments:write", "webhooks:receive"]);
-      credentials.push({
-        providerAppId: id,
-        publicId: credential.publicId,
-        fingerprint: credential.secretFingerprint,
-        scopes: credential.scopes,
-      });
-      return { app, issuedSecretOnce: rawSecret, publicId: credential.publicId };
-    }
     return { app };
   },
 

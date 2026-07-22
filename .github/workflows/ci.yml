@@ -2,20 +2,33 @@ name: ci
 
 on:
   push:
-    branches: [main, master]
+    # Every branch, not just the default one. Gate work happens on branches and
+    # is reviewed before merge, so continuous integration has to run there too.
+    branches: ["**"]
   pull_request:
 
+# G1 build truth (D-20). Before this, continuous integration never built or
+# type-checked any of the four browser applications, and only compiled the
+# ledger without running its tests -- so a green run said much less than it
+# appeared to. Every job below was verified locally before being committed.
+
 jobs:
-  ledger:
+  financial-core:
+    # Note: this crate is NOT in the money path. Nothing links or calls it.
+    # It is kept as executable specification for double-entry and policy rules
+    # (D-11). A green result here is not ledger assurance -- the ledger's own
+    # assurance is the `ledger` job.
+    name: financial-core (specification crate)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Ledger tests
+      - name: Crate tests
         working-directory: native/financial-core
         run: cargo test
 
-  js:
+  packages:
+    name: shared packages
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,55 +37,203 @@ jobs:
           node-version: "20"
           cache: npm
       - run: npm install
-      - run: npm run build -w @ephera/intent-schema
-      - run: npm run build -w @ephera/validation
-      - run: npm run build -w @ephera/design-tokens
-      - run: npm run build -w @ephera/payment-sdk
-      - run: npm run build -w @ephera/passkeys
-      - run: npm run build -w @ephera/offline-queue
-      - run: npm run build -w @ephera/voice-sdk
-      - run: npm run build -w @ephera/api-client
-      - run: npm run test -w @ephera/validation
-      - run: npm run test -w @ephera/passkeys
-      - run: npm run test -w @ephera/offline-queue
+      - name: Build packages
+        run: |
+          for p in intent-schema validation design-tokens payment-sdk \
+                   passkeys offline-queue voice-sdk api-client capability-schema; do
+            npm run build -w "@ephera/$p"
+          done
+      - name: Package tests
+        run: |
+          npm run test -w @ephera/validation
+          npm run test -w @ephera/passkeys
+          npm run test -w @ephera/offline-queue
+          npm run test -w @ephera/connect-layer
 
-  payments-go:
+  apps:
+    name: browser applications
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm install
+      # Explicit dependency order. `npm run build --workspaces` picks its own
+      # order, which built payment-sdk before validation had emitted its types
+      # and built the applications before any package was ready.
+      - name: Build workspace packages first
+        run: |
+          for p in design-tokens intent-schema validation payment-sdk \
+                   passkeys offline-queue voice-sdk api-client capability-schema; do
+            npm run build -w "@ephera/$p"
+          done
+      - name: Type-check applications
+        run: |
+          for a in merchant-web consumer-pwa admin-console provider-portal; do
+            npm run typecheck -w "@ephera/$a"
+          done
+      - name: Build applications
+        run: |
+          for a in merchant-web consumer-pwa admin-console provider-portal; do
+            npm run build -w "@ephera/$a"
+          done
+
+  ledger:
+    name: ledger (schema invariants)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ephera
+          POSTGRES_PASSWORD: ephera_dev_only
+          POSTGRES_DB: ephera_ledger
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U ephera -d ephera_ledger"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      LEDGER_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5433/ephera_ledger?sslmode=disable
+      LEDGER_TEST_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5433/ephera_ledger?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Apply migrations
+        run: ./scripts/db-migrate.sh
+      - name: Migrations are idempotent
+        run: ./scripts/db-migrate.sh
+      - name: Build
+        working-directory: services/ledger
+        run: go build ./...
+      - name: Tests (unit + schema invariants against Postgres)
+        working-directory: services/ledger
+        run: go test ./...
+
+  authgrant:
+    name: authorisation grants
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-      - name: Go tests
+      - name: Tests
+        working-directory: services/authgrant
+        run: go test ./...
+
+  identity-access:
+    name: identity-access (passkey ceremonies)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ephera
+          POSTGRES_PASSWORD: ephera_dev_only
+          POSTGRES_DB: ephera_identity
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U ephera -d ephera_identity"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      IDENTITY_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5434/ephera_identity?sslmode=disable
+      IDENTITY_TEST_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5434/ephera_identity?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Apply migrations
+        run: ./scripts/db-migrate.sh identity-access
+      - name: Migrations are idempotent
+        run: ./scripts/db-migrate.sh identity-access
+      - name: Build
+        working-directory: services/identity-access
+        run: go build ./...
+      - name: Vet
+        working-directory: services/identity-access
+        run: go vet ./...
+      - name: Tests (WebAuthn registration and assertion ceremonies)
+        working-directory: services/identity-access
+        run: go test ./...
+
+  control-plane:
+    name: platform-control-bff (operator authorisation)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ephera
+          POSTGRES_PASSWORD: ephera_dev_only
+          POSTGRES_DB: ephera_operations
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd "pg_isready -U ephera -d ephera_operations"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CONTROL_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5435/ephera_operations?sslmode=disable
+      CONTROL_TEST_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5435/ephera_operations?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Apply migrations
+        run: ./scripts/db-migrate.sh platform-control-bff
+      - name: Migrations are idempotent
+        run: ./scripts/db-migrate.sh platform-control-bff
+      - name: Build
+        working-directory: services/platform-control-bff
+        run: go build ./...
+      - name: Vet
+        working-directory: services/platform-control-bff
+        run: go vet ./...
+      - name: Negative authorisation tests
+        working-directory: services/platform-control-bff
+        run: go test ./...
+
+  payments:
+    name: payments
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Build
+        working-directory: services/payments
+        run: go build ./...
+      - name: Tests
         working-directory: services/payments
         run: go test ./...
 
-  ledger-go:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-      - name: Build ledger
-        working-directory: services/ledger
-        run: go build ./cmd/api
-
   voice-intent:
+    name: voice-intent
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Compiler unit checks
+      - name: Install
         working-directory: services/voice-intent
         run: |
-          python3 -c "
-          from intent_compiler import compile_text, needs_clarification
-          i = compile_text('Send 50 cedis to Ama')
-          assert i['name']=='send_money' and i['amount']['amountMinor']==5000
-          assert not needs_clarification(i)
-          assert compile_text('Freeze my wallet. Phone stolen')['name']=='freeze_wallet'
-          print('ok')
-          "
+          python -m pip install --upgrade pip
+          pip install pytest
+      - name: Tests
+        working-directory: services/voice-intent
+        run: python -m pytest -q

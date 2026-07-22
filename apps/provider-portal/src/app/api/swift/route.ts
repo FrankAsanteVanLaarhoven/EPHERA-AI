@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
+import { sessionFromRequest, unauthorised } from "@/lib/session";
 import { SANDBOX_BIC_DIRECTORY, type SwiftMessageType } from "@ephera/connect-layer";
 import { providerStore } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
   return NextResponse.json({
     directory: SANDBOX_BIC_DIRECTORY,
     messages: providerStore.swiftMessages,
@@ -12,6 +13,10 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  // Gated at G4: this returned every provider's cross-border messages to any caller (D-08).
+  const auth = sessionFromRequest(req);
+  if (!auth.ok) return unauthorised(auth.reason);
+
   const body = (await req.json()) as {
     applicationId: string;
     type?: SwiftMessageType;

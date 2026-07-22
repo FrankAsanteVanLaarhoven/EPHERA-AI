@@ -225,7 +225,7 @@ npm run dev:merchant          # Merchant web
 npm run mobile:lan            # Expo on LAN for physical devices
 ```
 
-Super Admin (sandbox password `ephera-super-admin`): workflows/errors, devices & regions, providers (MTN, open banking, utilities), feature flags, AI model control, direct debit / standing orders. See [`docs/product/ADMIN-CONSOLE.md`](docs/product/ADMIN-CONSOLE.md).
+Super Admin (read-only; state changes move through platform-control-bff): workflows/errors, devices & regions, providers (MTN, open banking, utilities), feature flags, AI model control, direct debit / standing orders. See [`docs/product/ADMIN-CONSOLE.md`](docs/product/ADMIN-CONSOLE.md).
 
 Default ports: [`docs/runbooks/local-dev.md`](docs/runbooks/local-dev.md)
 

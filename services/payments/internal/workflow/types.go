@@ -12,6 +12,10 @@ type DomesticTransferInput struct {
 	FromExternalRef  string `json:"fromExternalRef"`
 	ToExternalRef    string `json:"toExternalRef"`
 	Rail             string `json:"rail"` // mobile-money-sim | bank-transfer-sim
+	// FeeMinor is fixed when the transfer is prepared and is covered by the
+	// authorisation grant's binding. It is not recomputed later, so the fee the
+	// user authorised is the fee the ledger posts (ADR 0005).
+	FeeMinor         int64  `json:"feeMinor"`
 	AuthorisationRef string `json:"authorisationRef"`
 	FailMode         string `json:"failMode,omitempty"`
 }

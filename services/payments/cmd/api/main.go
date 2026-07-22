@@ -34,6 +34,7 @@ type transferRequest struct {
 	FromExternalRef  string `json:"fromExternalRef"`
 	ToExternalRef    string `json:"toExternalRef"`
 	Rail             string `json:"rail"`
+	TransferID       string `json:"transferId"`
 	AuthorisationRef string `json:"authorisationRef"`
 	IdempotencyKey   string `json:"idempotencyKey"`
 	FailMode         string `json:"failMode,omitempty"`
@@ -54,6 +55,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /v1/quotes", s.quote)
+	mux.HandleFunc("POST /v1/transfers/prepare", s.prepareTransfer)
 	mux.HandleFunc("POST /v1/transfers", s.transfer)
 	mux.HandleFunc("GET /v1/transfers/{id}", s.getTransfer)
 	mux.HandleFunc("GET /v1/balances/{ref}", s.balance)
@@ -161,13 +163,7 @@ func (s *server) quote(w http.ResponseWriter, r *http.Request) {
 	if req.Rail == "" {
 		req.Rail = "mobile-money-sim"
 	}
-	fee := int64(0)
-	if req.AmountMinor >= 10000 {
-		fee = 50
-	}
-	if req.Rail == "bank-transfer-sim" {
-		fee = 100
-	}
+	fee := feeFor(req.Rail, req.AmountMinor)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"sendAmountMinor":    req.AmountMinor,
 		"receiveAmountMinor": req.AmountMinor,
@@ -181,23 +177,75 @@ func (s *server) quote(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
+// prepareTransfer fixes the exact transaction the user is about to authorise:
+// the transfer id, the recipient account and the fee. The client then obtains
+// an authorisation grant bound to precisely these values (ADR 0002), so the
+// transaction that gets authorised is the transaction that gets posted. Nothing
+// is reserved or moved here.
+func (s *server) prepareTransfer(w http.ResponseWriter, r *http.Request) {
 	var req transferRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if req.AuthorisationRef == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{
-			"error":   "authorisation_required",
-			"message": "Voice alone is never sufficient. Provide passkey authorisation reference.",
-		})
 		return
 	}
 	if req.AmountMinor <= 0 || req.RecipientName == "" {
 		http.Error(w, "amountMinor and recipientName required", http.StatusBadRequest)
 		return
 	}
+	applyDefaults(&req)
+
+	prepared := preparedTransfer{
+		TransferID:      "tx_" + uuid.NewString(),
+		IdempotencyKey:  req.IdempotencyKey,
+		FromExternalRef: req.FromExternalRef,
+		ToExternalRef:   req.ToExternalRef,
+		AmountMinor:     req.AmountMinor,
+		FeeMinor:        feeFor(req.Rail, req.AmountMinor),
+		Currency:        req.Currency,
+		Rail:            req.Rail,
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"transferId":      prepared.TransferID,
+		"idempotencyKey":  prepared.IdempotencyKey,
+		"fromExternalRef": prepared.FromExternalRef,
+		"toExternalRef":   prepared.ToExternalRef,
+		"amountMinor":     prepared.AmountMinor,
+		"feeMinor":        prepared.FeeMinor,
+		"totalDebitMinor": prepared.AmountMinor + prepared.FeeMinor,
+		"currency":        prepared.Currency,
+		"rail":            prepared.Rail,
+		"requiresGrant":   true,
+		"message":         "Obtain an authorisation grant bound to these exact values, then submit the transfer.",
+	})
+}
+
+type preparedTransfer struct {
+	TransferID      string
+	IdempotencyKey  string
+	FromExternalRef string
+	ToExternalRef   string
+	AmountMinor     int64
+	FeeMinor        int64
+	Currency        string
+	Rail            string
+}
+
+// feeFor is the single source of fee truth for a transfer. Quote, prepare,
+// authorisation binding and ledger capture all use this one value (ADR 0005).
+func feeFor(rail string, amountMinor int64) int64 {
+	switch rail {
+	case "bank-transfer-sim":
+		return 100
+	default:
+		if amountMinor >= 10000 {
+			return 50
+		}
+		return 0
+	}
+}
+
+func applyDefaults(req *transferRequest) {
 	if req.Currency == "" {
 		req.Currency = "GHS"
 	}
@@ -213,7 +261,38 @@ func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
 	if req.ToExternalRef == "" {
 		req.ToExternalRef = mapRecipient(req.RecipientName)
 	}
-	transferID := "tx_" + uuid.NewString()
+}
+
+func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
+	var req transferRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.AuthorisationRef == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error": "authorisation_required",
+			"message": "Voice alone is never sufficient. Prepare the transfer, obtain an " +
+				"authorisation grant bound to it, and submit the grant.",
+		})
+		return
+	}
+	if req.AmountMinor <= 0 || req.RecipientName == "" {
+		http.Error(w, "amountMinor and recipientName required", http.StatusBadRequest)
+		return
+	}
+	// The transfer id is assigned at prepare and is covered by the grant's
+	// binding. Minting a new one here would break the binding, which is the
+	// point: the client must submit the transfer it had authorised.
+	if req.TransferID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":   "prepare_required",
+			"message": "transferId is required. Call POST /v1/transfers/prepare first.",
+		})
+		return
+	}
+	applyDefaults(&req)
+	transferID := req.TransferID
 
 	input := workflow.DomesticTransferInput{
 		TransferID:       transferID,
@@ -225,6 +304,7 @@ func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
 		FromExternalRef:  req.FromExternalRef,
 		ToExternalRef:    req.ToExternalRef,
 		Rail:             req.Rail,
+		FeeMinor:         feeFor(req.Rail, req.AmountMinor),
 		AuthorisationRef: req.AuthorisationRef,
 		FailMode:         req.FailMode,
 	}

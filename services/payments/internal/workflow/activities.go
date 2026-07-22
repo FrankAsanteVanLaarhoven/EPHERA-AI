@@ -6,6 +6,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/ephera/authgrant"
 	"github.com/ephera/payments/internal/adapter"
 	"github.com/ephera/payments/internal/adapter/airtime"
 	"github.com/ephera/payments/internal/adapter/bank"
@@ -50,12 +51,34 @@ func (a *Activities) Quote(ctx context.Context, rail string, amountMinor int64, 
 	return r.Quote(ctx, amountMinor, currency, currency)
 }
 
-func (a *Activities) RequireAuthorisation(_ context.Context, authRef string) error {
-	if authRef == "" {
-		return fmt.Errorf("missing authorisation: voice alone is never sufficient")
+// RequireAuthorisation is a fail-fast pre-check, NOT an authorisation decision.
+//
+// It parses the grant without verifying its signature and confirms it claims to
+// be bound to this exact transfer, so the workflow does not place a hold and
+// call a rail for a grant that will be refused at capture. The authority is the
+// ledger, which verifies the signature, the validity window and the binding,
+// and consumes the grant so it cannot be used twice (ADR 0001, ADR 0002).
+//
+// Before G2 this was a length check -- any string of eight characters was
+// accepted (D-01).
+func (a *Activities) RequireAuthorisation(_ context.Context, in DomesticTransferInput) error {
+	if in.AuthorisationRef == "" {
+		return fmt.Errorf("missing authorisation grant: voice alone is never sufficient")
 	}
-	if len(authRef) < 8 {
-		return fmt.Errorf("invalid authorisation reference")
+	claimed, err := authgrant.ParseUnverified(in.AuthorisationRef)
+	if err != nil {
+		return fmt.Errorf("authorisation is not a grant: %w", err)
+	}
+	want := authgrant.Binding{
+		FromExternalRef: in.FromExternalRef,
+		ToExternalRef:   in.ToExternalRef,
+		AmountMinor:     in.AmountMinor,
+		FeeMinor:        in.FeeMinor,
+		Currency:        in.Currency,
+		TransferID:      in.TransferID,
+	}
+	if claimed.Binding != want.Digest() {
+		return fmt.Errorf("authorisation grant is not bound to this transfer")
 	}
 	return nil
 }
@@ -75,7 +98,7 @@ func (a *Activities) ReleaseLedgerHold(ctx context.Context, holdID string) error
 }
 
 func (a *Activities) ExecuteRail(ctx context.Context, in DomesticTransferInput) (adapter.ExecutionResult, error) {
-	if err := a.RequireAuthorisation(ctx, in.AuthorisationRef); err != nil {
+	if err := a.RequireAuthorisation(ctx, in); err != nil {
 		return adapter.ExecutionResult{}, err
 	}
 	r, ok := a.rails[in.Rail]
@@ -144,7 +167,7 @@ func (a *Activities) GetReceipt(_ context.Context, id string) (Receipt, error) {
 }
 
 func (a *Activities) ExecuteAirtime(ctx context.Context, in AirtimeInput) (adapter.ExecutionResult, error) {
-	if err := a.RequireAuthorisation(ctx, in.AuthorisationRef); err != nil {
+	if err := a.RequireGrantPresent(ctx, in.AuthorisationRef); err != nil {
 		return adapter.ExecutionResult{}, err
 	}
 	r := a.rails["airtime-sim"]
@@ -160,7 +183,7 @@ func (a *Activities) ExecuteAirtime(ctx context.Context, in AirtimeInput) (adapt
 }
 
 func (a *Activities) FreezeWallet(ctx context.Context, externalRef, reason, authRef string) error {
-	if err := a.RequireAuthorisation(ctx, authRef); err != nil {
+	if err := a.RequireGrantPresent(ctx, authRef); err != nil {
 		return err
 	}
 	if externalRef == "" {
@@ -168,4 +191,18 @@ func (a *Activities) FreezeWallet(ctx context.Context, externalRef, reason, auth
 	}
 	_, err := a.ledger.Freeze(ctx, externalRef, reason, authRef)
 	return err
+}
+
+// RequireGrantPresent is the pre-check for flows that do not yet post to the
+// ledger (airtime) or that carry their own binding shape (freeze). It confirms
+// a grant was supplied and is structurally a grant. It is not authorisation --
+// binding those flows to a grant is outstanding G2 work.
+func (a *Activities) RequireGrantPresent(_ context.Context, authRef string) error {
+	if authRef == "" {
+		return fmt.Errorf("missing authorisation grant: voice alone is never sufficient")
+	}
+	if _, err := authgrant.ParseUnverified(authRef); err != nil {
+		return fmt.Errorf("authorisation is not a grant: %w", err)
+	}
+	return nil
 }

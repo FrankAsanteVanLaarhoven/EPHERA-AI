@@ -158,7 +158,7 @@ export type CommunicationEvent = {
 export type AiModel = {
   id: string;
   name: string;
-  role: "voice_intent" | "fraud" | "support" | "recommendations" | "kyc" | "pricing" | "ops_copilot";
+  role: "voice_intent" | "fraud" | "support" | "recommendations" | "kyc" | "pricing" | "ops_assistant";
   provider: string;
   version: string;
   status: "active" | "canary" | "disabled" | "training";

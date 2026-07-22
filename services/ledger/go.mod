@@ -15,3 +15,7 @@ require (
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 )
+
+require github.com/ephera/authgrant v0.0.0
+
+replace github.com/ephera/authgrant => ../authgrant
