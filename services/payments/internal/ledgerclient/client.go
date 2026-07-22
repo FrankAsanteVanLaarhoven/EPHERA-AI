@@ -123,3 +123,28 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	}
 	return json.Unmarshal(data, out)
 }
+
+// LedgerReceipt is the receipt the ledger issued in the same transaction as the
+// postings. Intact is the ledger's own re-computation of the content hash.
+type LedgerReceipt struct {
+	ID                  string `json:"id"`
+	TransferID          string `json:"transferId"`
+	JournalEntryID      string `json:"journalEntryId"`
+	AmountMinor         int64  `json:"amountMinor"`
+	FeeMinor            int64  `json:"feeMinor"`
+	Currency            string `json:"currency"`
+	Description         string `json:"description"`
+	AuthorisationMethod string `json:"authorisationMethod"`
+	GrantID             string `json:"grantId"`
+	IssuedAt            string `json:"issuedAt"`
+	ContentHash         string `json:"contentHash"`
+}
+
+func (c *Client) ReceiptForTransfer(ctx context.Context, transferID string) (LedgerReceipt, bool, error) {
+	var out struct {
+		Receipt LedgerReceipt `json:"receipt"`
+		Intact  bool          `json:"intact"`
+	}
+	err := c.do(ctx, http.MethodGet, "/v1/transfers/"+transferID+"/receipt", nil, &out)
+	return out.Receipt, out.Intact, err
+}

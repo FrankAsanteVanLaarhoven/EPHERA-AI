@@ -49,6 +49,15 @@ type Receipt struct {
 	Status        string `json:"status"`
 	ProviderRef   string `json:"providerRef"`
 	Authorisation string `json:"authorisation"`
+	// Carried from the ledger's own receipt when the payment posted. Empty on a
+	// failure, which is the honest answer: nothing was posted to cite.
+	LedgerEntryID       string `json:"ledgerEntryId,omitempty"`
+	AmountMinor         int64  `json:"amountMinor,omitempty"`
+	FeeMinor            int64  `json:"feeMinor,omitempty"`
+	Currency            string `json:"currency,omitempty"`
+	AuthorisationMethod string `json:"authorisationMethod,omitempty"`
+	ContentHash         string `json:"contentHash,omitempty"`
+	Verified            bool   `json:"verified,omitempty"`
 }
 
 const TaskQueue = "ephera-payments"

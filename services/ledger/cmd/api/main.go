@@ -68,6 +68,8 @@ func main() {
 	mux.HandleFunc("POST /v1/transfers", s.serviceOnly(s.transfer))
 
 	// Operators, authenticated by their own session.
+	mux.HandleFunc("GET /v1/receipts/{id}", s.serviceOnly(s.getReceipt))
+	mux.HandleFunc("GET /v1/transfers/{id}/receipt", s.serviceOnly(s.getReceiptForTransfer))
 	mux.HandleFunc("POST /v1/operator/accounts/{ref}/freeze", s.operatorFreeze)
 	mux.HandleFunc("POST /v1/operator/accounts/{ref}/unfreeze", s.operatorUnfreeze)
 
@@ -213,6 +215,27 @@ var (
 	errMissingSession = errors.New("missing bearer operator session")
 	errNoKey          = errors.New("ledger has no authorisation public key configured")
 )
+
+// getReceipt returns a receipt and says whether it still matches its own hash.
+// A caller displaying a receipt to a customer should not have to take its
+// integrity on trust any more than the customer should.
+func (s *server) getReceipt(w http.ResponseWriter, r *http.Request) {
+	rec, intact, err := s.st.VerifyReceipt(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"receipt": rec, "intact": intact})
+}
+
+func (s *server) getReceiptForTransfer(w http.ResponseWriter, r *http.Request) {
+	rec, err := s.st.ReceiptForTransfer(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"receipt": rec, "intact": rec.Hash() == rec.ContentHash})
+}
 
 func writeStoreErr(w http.ResponseWriter, err error) {
 	switch {

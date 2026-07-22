@@ -618,3 +618,114 @@ func TestEvidenceRecordsTheAuthorisationMethod(t *testing.T) {
 		t.Fatal("evidence does not reference the grant that authorised it")
 	}
 }
+
+// --- receipts ---
+
+// A receipt is written in the same transaction as the postings, so it cannot
+// describe a payment the ledger did not make.
+func TestReceiptIsIssuedWithThePosting(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	from := openWallet(t, st, "GHS", 100_000)
+	to := openWallet(t, st, "GHS", 0)
+	req := authorised(t, TransferRequest{
+		FromExternalRef: from, ToExternalRef: to,
+		AmountMinor: 30_000, FeeMinor: 50, Currency: "GHS",
+		TransferID:     "tx_" + uuid.NewString(),
+		IdempotencyKey: "idem_" + uuid.NewString(),
+		Description:    "Send to Ama",
+	})
+	jeID, err := st.CaptureTransfer(ctx, req)
+	if err != nil {
+		t.Fatalf("transfer: %v", err)
+	}
+
+	rec, err := st.ReceiptForTransfer(ctx, req.TransferID)
+	if err != nil {
+		t.Fatalf("receipt: %v", err)
+	}
+	// Every field must match what was posted, not what a caller intended.
+	if rec.JournalEntryID != jeID {
+		t.Fatalf("receipt cites journal entry %q, posting was %q", rec.JournalEntryID, jeID)
+	}
+	if rec.AmountMinor != 30_000 || rec.FeeMinor != 50 {
+		t.Fatalf("receipt says %d + %d", rec.AmountMinor, rec.FeeMinor)
+	}
+	// The authorisation method travels from the grant, so a sandbox
+	// authorisation cannot be presented to a customer as a passkey one.
+	if rec.AuthorisationMethod != "sandbox_authenticator" {
+		t.Fatalf("receipt claims method %q", rec.AuthorisationMethod)
+	}
+	if rec.GrantID == "" {
+		t.Fatal("receipt does not cite the grant that authorised it")
+	}
+}
+
+// A refused payment issues no receipt. A receipt for a payment that never
+// happened is worse than none.
+func TestNoReceiptForARefusedPayment(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	from := openWallet(t, st, "GHS", 1_000)
+	to := openWallet(t, st, "GHS", 0)
+	transferID := "tx_" + uuid.NewString()
+	_, err := st.CaptureTransfer(ctx, authorised(t, TransferRequest{
+		FromExternalRef: from, ToExternalRef: to,
+		AmountMinor: 5_000, Currency: "GHS", // more than the balance
+		TransferID: transferID, IdempotencyKey: "idem_" + uuid.NewString(),
+	}))
+	if !errors.Is(err, ErrInsufficientFunds) {
+		t.Fatalf("expected insufficient funds, got %v", err)
+	}
+	if _, err := st.ReceiptForTransfer(ctx, transferID); !errors.Is(err, ErrNotFound) {
+		t.Fatal("a refused payment produced a receipt")
+	}
+}
+
+func TestReceiptVerifiesAgainstItsOwnHash(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	from := openWallet(t, st, "GHS", 60_000)
+	to := openWallet(t, st, "GHS", 0)
+	req := authorised(t, TransferRequest{
+		FromExternalRef: from, ToExternalRef: to, AmountMinor: 5_000, Currency: "GHS",
+		TransferID: "tx_" + uuid.NewString(), IdempotencyKey: "idem_" + uuid.NewString(),
+	})
+	if _, err := st.CaptureTransfer(ctx, req); err != nil {
+		t.Fatalf("transfer: %v", err)
+	}
+	rec, _ := st.ReceiptForTransfer(ctx, req.TransferID)
+
+	_, intact, err := st.VerifyReceipt(ctx, rec.ID)
+	if err != nil || !intact {
+		t.Fatalf("a freshly issued receipt did not verify (intact=%v err=%v)", intact, err)
+	}
+}
+
+// Receipts are evidence: the database refuses to change or remove one.
+func TestReceiptsAreImmutable(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	from := openWallet(t, st, "GHS", 60_000)
+	to := openWallet(t, st, "GHS", 0)
+	req := authorised(t, TransferRequest{
+		FromExternalRef: from, ToExternalRef: to, AmountMinor: 5_000, Currency: "GHS",
+		TransferID: "tx_" + uuid.NewString(), IdempotencyKey: "idem_" + uuid.NewString(),
+	})
+	if _, err := st.CaptureTransfer(ctx, req); err != nil {
+		t.Fatalf("transfer: %v", err)
+	}
+	rec, _ := st.ReceiptForTransfer(ctx, req.TransferID)
+
+	if _, err := st.pool.Exec(ctx,
+		`UPDATE receipts SET amount_minor = 1 WHERE id = $1`, rec.ID); err == nil {
+		t.Fatal("a receipt was altered")
+	}
+	if _, err := st.pool.Exec(ctx, `DELETE FROM receipts WHERE id = $1`, rec.ID); err == nil {
+		t.Fatal("a receipt was deleted")
+	}
+}

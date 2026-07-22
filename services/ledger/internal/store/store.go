@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -386,6 +388,27 @@ func (s *Store) CaptureTransfer(ctx context.Context, req TransferRequest) (strin
 		return "", err
 	}
 
+	// The receipt is written here, in the same transaction as the postings, so
+	// it cannot describe a payment the ledger did not make. Its values come from
+	// what was actually posted rather than from what a caller intended.
+	receiptID := "rcpt_" + uuid.NewString()
+	receipt := Receipt{
+		ID: receiptID, TransferID: req.TransferID, JournalEntryID: jeID.String(),
+		FromExternalRef: req.FromExternalRef, ToExternalRef: req.ToExternalRef,
+		AmountMinor: req.AmountMinor, FeeMinor: req.FeeMinor, Currency: req.Currency,
+		Description: desc, AuthorisationMethod: string(grant.Method), GrantID: grant.ID,
+	}
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO receipts (id, transfer_id, journal_entry_id, from_external_ref,
+			to_external_ref, amount_minor, fee_minor, currency, description,
+			authorisation_method, grant_jti, content_hash)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+	`, receipt.ID, receipt.TransferID, jeID, receipt.FromExternalRef, receipt.ToExternalRef,
+		receipt.AmountMinor, receipt.FeeMinor, receipt.Currency, receipt.Description,
+		receipt.AuthorisationMethod, receipt.GrantID, receipt.Hash()); err != nil {
+		return "", fmt.Errorf("receipt: %w", err)
+	}
+
 	_, err = tx.Exec(ctx, `
 		INSERT INTO authorisation_evidence (transfer_id, method, policy_decision, grant_jti)
 		VALUES ($1, $2, $3::jsonb, $4)
@@ -510,4 +533,79 @@ func (s *Store) UnfreezeBy(ctx context.Context, externalRef string, by FreezeAut
 		return Account{}, err
 	}
 	return s.GetByExternalRef(ctx, externalRef)
+}
+
+// --- receipts ---
+
+// Receipt is the customer-facing proof of a payment. Every field is a value the
+// ledger actually posted; nothing here is supplied by a caller after the fact.
+type Receipt struct {
+	ID                  string    `json:"id"`
+	TransferID          string    `json:"transferId"`
+	JournalEntryID      string    `json:"journalEntryId"`
+	FromExternalRef     string    `json:"fromExternalRef"`
+	ToExternalRef       string    `json:"toExternalRef"`
+	AmountMinor         int64     `json:"amountMinor"`
+	FeeMinor            int64     `json:"feeMinor"`
+	Currency            string    `json:"currency"`
+	Description         string    `json:"description"`
+	AuthorisationMethod string    `json:"authorisationMethod"`
+	GrantID             string    `json:"grantId"`
+	IssuedAt            time.Time `json:"issuedAt"`
+	ContentHash         string    `json:"contentHash"`
+}
+
+// Hash covers every field a customer or a reviewer would rely on, length
+// prefixed so no rearrangement of adjacent values produces the same digest.
+func (r Receipt) Hash() string {
+	h := sha256.New()
+	for _, f := range []string{
+		r.ID, r.TransferID, r.JournalEntryID, r.FromExternalRef, r.ToExternalRef,
+		fmt.Sprint(r.AmountMinor), fmt.Sprint(r.FeeMinor), r.Currency,
+		r.Description, r.AuthorisationMethod, r.GrantID,
+	} {
+		_, _ = fmt.Fprintf(h, "%d:%s|", len(f), f)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func (s *Store) Receipt(ctx context.Context, id string) (Receipt, error) {
+	var r Receipt
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, transfer_id, journal_entry_id::text, from_external_ref, to_external_ref,
+		       amount_minor, fee_minor, currency, description, authorisation_method,
+		       grant_jti, issued_at, content_hash
+		FROM receipts WHERE id = $1
+	`, id).Scan(&r.ID, &r.TransferID, &r.JournalEntryID, &r.FromExternalRef, &r.ToExternalRef,
+		&r.AmountMinor, &r.FeeMinor, &r.Currency, &r.Description, &r.AuthorisationMethod,
+		&r.GrantID, &r.IssuedAt, &r.ContentHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Receipt{}, ErrNotFound
+	}
+	return r, err
+}
+
+// ReceiptForTransfer returns the receipt issued for a transfer.
+func (s *Store) ReceiptForTransfer(ctx context.Context, transferID string) (Receipt, error) {
+	var id string
+	err := s.pool.QueryRow(ctx,
+		`SELECT id FROM receipts WHERE transfer_id = $1 ORDER BY issued_at DESC LIMIT 1`,
+		transferID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Receipt{}, ErrNotFound
+	}
+	if err != nil {
+		return Receipt{}, err
+	}
+	return s.Receipt(ctx, id)
+}
+
+// VerifyReceipt recomputes the hash. A receipt that does not match the values it
+// carries has been altered since it was issued.
+func (s *Store) VerifyReceipt(ctx context.Context, id string) (Receipt, bool, error) {
+	r, err := s.Receipt(ctx, id)
+	if err != nil {
+		return Receipt{}, false, err
+	}
+	return r, r.Hash() == r.ContentHash, nil
 }

@@ -141,7 +141,16 @@ func (a *Activities) CaptureLedger(ctx context.Context, in DomesticTransferInput
 	})
 }
 
-func (a *Activities) CreateReceipt(_ context.Context, transferID, status, providerRef, authRef, summary string) (Receipt, error) {
+// CreateReceipt no longer mints a receipt. For a settled payment the ledger has
+// already issued one inside the same transaction as the postings, so the receipt
+// cannot describe money that did not move; this reads that one back rather than
+// composing a second account of the same event from values the worker happens to
+// hold. Two receipts for one payment is one receipt too many, and the one worth
+// keeping is the one the money is bound to.
+//
+// A payment that never posted has no ledger receipt, so the worker still issues
+// its own for the failure record — a failure is not evidence of a posting.
+func (a *Activities) CreateReceipt(ctx context.Context, transferID, status, providerRef, authRef, summary string) (Receipt, error) {
 	rec := Receipt{
 		ID:            "rcpt_" + uuid.NewString(),
 		TransferID:    transferID,
@@ -149,6 +158,14 @@ func (a *Activities) CreateReceipt(_ context.Context, transferID, status, provid
 		Status:        status,
 		ProviderRef:   providerRef,
 		Authorisation: authRef,
+	}
+	if lr, intact, err := a.ledger.ReceiptForTransfer(ctx, transferID); err == nil && lr.ID != "" {
+		rec.ID = lr.ID
+		rec.Authorisation = lr.GrantID
+		rec.LedgerEntryID = lr.JournalEntryID
+		rec.AmountMinor, rec.FeeMinor, rec.Currency = lr.AmountMinor, lr.FeeMinor, lr.Currency
+		rec.AuthorisationMethod = lr.AuthorisationMethod
+		rec.ContentHash, rec.Verified = lr.ContentHash, intact
 	}
 	a.mu.Lock()
 	a.receipts[rec.ID] = rec
