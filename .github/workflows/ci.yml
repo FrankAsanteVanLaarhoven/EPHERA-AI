@@ -105,7 +105,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
       - name: Apply migrations
         run: ./scripts/db-migrate.sh
       - name: Migrations are idempotent
@@ -124,7 +124,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
       - name: Tests
         working-directory: services/authgrant
         run: go test ./...
@@ -253,7 +253,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
       - name: Build
         working-directory: services/payments
         run: go build ./...
@@ -294,3 +294,40 @@ jobs:
       - name: Tests
         working-directory: services/voice-intent
         run: python -m pytest -q
+
+  boundedauth:
+    name: bounded authority (module + conformance + vectors)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ephera
+          POSTGRES_PASSWORD: ephera_dev_only
+          POSTGRES_DB: boundedauth_ref
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U ephera -d boundedauth_ref"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      BOUNDEDAUTH_TEST_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5433/boundedauth_ref?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Core (credential format, single-use conformance, receipts) under the race detector
+        working-directory: modules/boundedauth
+        run: go test ./... -race
+      - name: The conformance suite fails deliberately broken stores
+        working-directory: modules/boundedauth
+        run: go test ./conformance/... -race -count=2
+      - name: PostgreSQL reference store satisfies the contract on a real database
+        working-directory: modules/boundedauth/postgres
+        run: go test ./... -race
+      - name: Test vectors reproduce in a second language
+        working-directory: modules/boundedauth
+        run: python3 testdata/verify_vectors.py

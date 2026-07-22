@@ -68,12 +68,16 @@ type Method string
 
 const (
 	// MethodPasskey is a verified WebAuthn assertion from a device-bound
-	// credential. Not yet implemented -- see G2-B.
+	// credential, where the authenticator challenge is the transaction's
+	// binding digest. Implemented in identity-access (mintWithPasskey) and
+	// covered by TestPasskeyCeremonyMintsAVerifiableGrant.
 	MethodPasskey Method = "passkey"
 
 	// MethodSandboxAuthenticator is a grant minted without any authenticator
-	// challenge. It exists so the sandbox remains demonstrable and is refused
-	// outside sandbox environments.
+	// challenge. It exists so the sandbox remains demonstrable. It is refused by
+	// the ledger money path unless the deployment explicitly opts in
+	// (Store.AllowSandboxMethod); authgrant.Verify does not itself gate on the
+	// method, so a verifier that accepts any method must add that check.
 	MethodSandboxAuthenticator Method = "sandbox_authenticator"
 )
 

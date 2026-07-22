@@ -13,8 +13,11 @@ own user interface) and what the code does.
 | **S2** | Blocks the gate it belongs to. |
 | **S3** | Fix in the normal course of the owning gate. |
 
-Counts at G0: **S1 — 14**, **S2 — 16**, **S3 — 14**, total **44**.
-Added since: D-45 (S2), found during G1.
+Total deviations: **45** (D-01–D-44 at G0, plus D-45 found during G1). Each
+row carries its own severity in the table below; an earlier hand-tallied
+S1/S2/S3 split stated here did not match the rows it summarised and has been
+removed rather than restated, since a count that disagrees with its own source
+is worse than no count.
 
 ## Status
 

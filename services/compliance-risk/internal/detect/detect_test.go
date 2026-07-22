@@ -174,3 +174,36 @@ func TestRecoveringAHealthyDetectorIsRefused(t *testing.T) {
 		t.Fatal("a healthy detector accepted a recovery")
 	}
 }
+
+// A fallen-back detector must not reinstate itself on a subsequent calm window.
+// Only Recover(), which takes an operator, returns it to service. Without this,
+// the second failure looks exactly like the first and the operator gate is a
+// formality.
+func TestFallbackIsNotClearedByACalmWindow(t *testing.T) {
+	m := NewMonitor(DefaultBaseline(), now)
+	for i := 0; i < 300; i++ {
+		m.Record(i%2 == 0) // 50% — forces a fallback
+	}
+	if state, _ := m.Evaluate(now); state != FallenBack {
+		t.Fatalf("precondition: expected FallenBack, got %s", state)
+	}
+	// A perfectly normal window arrives.
+	for i := 0; i < 300; i++ {
+		m.Record(i%20 == 0) // 5%, exactly the baseline
+	}
+	state, reason := m.Evaluate(now)
+	if state != FallenBack {
+		t.Fatalf("a calm window returned the detector to %s without an operator; "+
+			"the fallback reinstated itself", state)
+	}
+	if reason == "" {
+		t.Fatal("no reason given for staying fallen back")
+	}
+	// And an operator can still return it to service deliberately.
+	if err := m.Recover("risk.analyst@ephera.internal", now); err != nil {
+		t.Fatalf("operator recovery failed after a calm window: %v", err)
+	}
+	if state, _ := m.State(); state != Healthy {
+		t.Fatalf("state after operator recovery is %s", state)
+	}
+}

@@ -78,7 +78,7 @@ const applications: ProviderApplication[] = [
 
 const linkSessions: { token: LinkToken; providerAppId: string }[] = [];
 const connections: { providerAppId: string; connection: ItemConnection }[] = [];
-const swiftMessages: SwiftMessage[] = [];
+const swiftMessages: { providerAppId: string; message: SwiftMessage }[] = [];
 const credentials: { providerAppId: string; publicId: string; fingerprint: string; scopes: string[] }[] =
   [];
 
@@ -98,6 +98,24 @@ export const providerStore = {
   ownedBy(id: string, subject: string) {
     const app = applications.find((a) => a.id === id);
     return app?.ownerSubject === subject ? app : null;
+  },
+
+  /**
+   * Bank connections belonging to the caller's applications only.
+   *
+   * The open-banking read previously returned `connections` for every provider
+   * (account masks included) to any authenticated caller — the same
+   * cross-tenant disclosure the applications endpoint was fixed for (D-08/D-09).
+   */
+  connectionsForOwner(subject: string) {
+    const owned = new Set(applications.filter((a) => a.ownerSubject === subject).map((a) => a.id));
+    return connections.filter((c) => owned.has(c.providerAppId)).map((c) => c.connection);
+  },
+
+  /** SWIFT messages belonging to the caller's applications only. */
+  swiftForOwner(subject: string) {
+    const owned = new Set(applications.filter((a) => a.ownerSubject === subject).map((a) => a.id));
+    return swiftMessages.filter((m) => owned.has(m.providerAppId)).map((m) => m.message);
   },
 
   list() {
@@ -237,7 +255,7 @@ export const providerStore = {
 
   queueSwift(providerAppId: string, input: Parameters<typeof createSwiftMessage>[0]) {
     const msg = createSwiftMessage(input);
-    swiftMessages.unshift(msg);
+    swiftMessages.unshift({ providerAppId, message: msg });
     const app = applications.find((a) => a.id === providerAppId);
     if (app) {
       app.swift = {

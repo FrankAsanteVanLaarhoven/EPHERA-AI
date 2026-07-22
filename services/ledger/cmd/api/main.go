@@ -44,6 +44,14 @@ func main() {
 		log.Printf("authorisation grants verified against key %s...", pubHex[:16])
 	}
 
+	// Sandbox authenticator grants (minted with no real challenge) post money
+	// only where this is explicitly enabled. Default is closed: an environment
+	// that says nothing refuses them.
+	if env("EPHERA_ENV", "production") == "sandbox" || os.Getenv("LEDGER_ALLOW_SANDBOX_AUTHENTICATOR") == "true" {
+		st.AllowSandboxMethod(true)
+		log.Printf("WARNING: sandbox authenticator grants are ACCEPTED by this ledger")
+	}
+
 	// Callers must authenticate (D-02). Without a service token the ledger
 	// refuses every service call rather than accepting anyone who can reach it.
 	if _, ok := loadServiceToken(); !ok {

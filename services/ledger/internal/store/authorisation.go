@@ -31,6 +31,14 @@ func (s *Store) SetAuthorisationKey(pub ed25519.PublicKey) {
 	s.authPublicKey = pub
 }
 
+// AllowSandboxMethod opts the ledger in to accepting grants minted with no real
+// authenticator challenge. It exists so the sandbox remains demonstrable; it
+// must never be set in an environment that moves real money. Default is false —
+// the money path fails closed on a sandbox authorisation.
+func (s *Store) AllowSandboxMethod(allow bool) {
+	s.allowSandboxMethod = allow
+}
+
 // ParseAuthorisationKey reads a hex-encoded ed25519 public key.
 func ParseAuthorisationKey(hexKey string) (ed25519.PublicKey, error) {
 	raw, err := hex.DecodeString(hexKey)
@@ -67,6 +75,16 @@ func (s *Store) verifyGrant(req TransferRequest) (authgrant.Payload, error) {
 		// The specific reason is returned for operator diagnosis, not to help a
 		// caller find an accepted shape.
 		return authgrant.Payload{}, fmt.Errorf("%w: %v", ErrUnauthorised, err)
+	}
+
+	// The signature is valid, but a grant minted with no real authenticator
+	// challenge must not post money unless this deployment has explicitly opted
+	// in. authgrant.Verify does not check the method, so the ledger — the
+	// authority for balances — enforces it here and fails closed by default.
+	if p.Method == authgrant.MethodSandboxAuthenticator && !s.allowSandboxMethod {
+		return authgrant.Payload{}, fmt.Errorf(
+			"%w: grant was minted with the sandbox authenticator, which this ledger does not accept",
+			ErrUnauthorised)
 	}
 	return p, nil
 }

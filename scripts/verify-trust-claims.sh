@@ -178,10 +178,27 @@ if have_pg; then
     if [ "$got" = "t" ]; then green "$1"; else red "$1 (got '${got:-nothing}')"; fi
   }
 
+  # refused runs a statement that MUST fail (e.g. an UPDATE a trigger forbids).
+  # It passes only if the database raised. A check that a trigger merely EXISTS
+  # would still pass if the trigger body were emptied; this exercises it.
+  refused() { # refused <label> <db> <sql that must error>
+    if "$DOCKER" compose -f infrastructure/docker-compose.yml exec -T postgres \
+        psql -qtA -U ephera -d "$2" -c "$3" >/dev/null 2>&1; then
+      red "$1 (the statement succeeded; it should have been refused)"
+    else
+      green "$1"
+    fi
+  }
+
   check "an operator cannot approve their own change" ephera_operations \
     "SELECT count(*)=0 FROM change_requests WHERE decided_by = requested_by;"
-  check "audit log refuses UPDATE" ephera_operations \
-    "SELECT NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='audit_log_no_update') = false;"
+  # Exercise the trigger, don't just check it exists. A name-only check would
+  # pass even if the trigger body were emptied, and it never touched DELETE
+  # (which the append-only claim also covers).
+  refused "audit log refuses UPDATE" ephera_operations \
+    "UPDATE audit_log SET action='tampered' WHERE id IN (SELECT id FROM audit_log LIMIT 1);"
+  refused "audit log refuses DELETE" ephera_operations \
+    "DELETE FROM audit_log WHERE id IN (SELECT id FROM audit_log LIMIT 1);"
   check "a customer cannot decide their own KYC tier" ephera_compliance \
     "SELECT count(*)=0 FROM tier_decisions WHERE decided_by = subject;"
   check "no journal entry is unbalanced" ephera_ledger \
@@ -194,11 +211,26 @@ if have_pg; then
   # predate it. A blanket check would either fail forever on history or, worse,
   # be quietly loosened until it passed — and an invariant edited to fit the
   # data it was meant to police is not an invariant.
-  check "every transfer posted since grants existed cites a consumed grant" ephera_ledger \
-    "SELECT count(*)=0 FROM journal_entries je
-       WHERE je.transfer_id LIKE 'tx_%'
-         AND je.created_at > (SELECT min(consumed_at) FROM authorisation_grants)
-         AND NOT EXISTS (SELECT 1 FROM authorisation_grants g WHERE g.transfer_id = je.transfer_id);"
+  #
+  # But scoping to post-control rows means that on a database with no
+  # grant-backed transfers the check runs over ZERO rows and passes vacuously —
+  # proving nothing while reading as a green PASS. So it first counts how many
+  # rows it would actually test. If none, it SKIPs and points at the real proof:
+  # the ledger store tests in section 1, which mint a grant, capture, and assert
+  # a transfer with no verifiable grant is refused.
+  grant_era=$(psql_ ephera_ledger \
+    "SELECT count(*) FROM journal_entries je WHERE je.transfer_id LIKE 'tx_%'
+       AND je.created_at > (SELECT min(consumed_at) FROM authorisation_grants);" | tr -d '[:space:]')
+  if [ "${grant_era:-0}" -gt 0 ]; then
+    check "every one of $grant_era grant-era transfers cites a consumed grant" ephera_ledger \
+      "SELECT count(*)=0 FROM journal_entries je
+         WHERE je.transfer_id LIKE 'tx_%'
+           AND je.created_at > (SELECT min(consumed_at) FROM authorisation_grants)
+           AND NOT EXISTS (SELECT 1 FROM authorisation_grants g WHERE g.transfer_id = je.transfer_id);"
+  else
+    grey "grant enforcement on posted transfers" \
+      "no grant-era transfers in this database; enforcement is proven by the ledger store tests in section 1, not by historical rows"
+  fi
   legacy=$(psql_ ephera_ledger \
     "SELECT count(*) FROM journal_entries je WHERE je.transfer_id LIKE 'tx_%'
        AND je.created_at <= (SELECT min(consumed_at) FROM authorisation_grants);" | tr -d '[:space:]')

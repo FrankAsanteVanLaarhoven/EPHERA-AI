@@ -25,6 +25,13 @@ var (
 type Store struct {
 	pool          *pgxpool.Pool
 	authPublicKey ed25519.PublicKey
+	// allowSandboxMethod permits grants minted with no real authenticator
+	// challenge (MethodSandboxAuthenticator) to post money. It defaults to
+	// false, so the money path fails closed: a sandbox grant is refused unless
+	// the deployment has explicitly opted in. Without this, a grant minted with
+	// no authenticator was accepted exactly like a passkey grant in every
+	// environment, despite the authgrant docs claiming otherwise.
+	allowSandboxMethod bool
 }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {

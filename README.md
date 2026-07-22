@@ -212,7 +212,7 @@ See also: [`docs/threat-model/`](docs/threat-model/) · [`docs/brand/SYSTEM.md`]
 
 - **Node.js** 20+
 - **Docker Desktop**
-- **Go** 1.22+ (payments / ledger)
+- **Go** 1.24+ (all Go services)
 - **Python** 3.11+ (voice-intent)
 - **Rust** stable (financial-core tests)
 - Optional: Xcode / Android Studio for device builds

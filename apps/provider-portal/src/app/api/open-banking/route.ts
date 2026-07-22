@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
-import { sessionFromRequest, unauthorised } from "@/lib/session";
+import { forbidden, sessionFromRequest, unauthorised } from "@/lib/session";
 import { initiatePayment, verifyAccountName } from "@ephera/connect-layer";
 import { providerStore } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  // Gated at G4: this returned every provider's bank connections to any caller (D-08).
+  // Authenticated at G4, but it still returned EVERY provider's bank
+  // connections (account masks included), not the caller's. Now owner-scoped
+  // (D-08/D-09).
   const auth = sessionFromRequest(req);
   if (!auth.ok) return unauthorised(auth.reason);
 
@@ -14,7 +16,7 @@ export async function GET(req: Request) {
   const country = searchParams.get("country") || undefined;
   return NextResponse.json({
     institutions: providerStore.listInstitutions(country || undefined),
-    connections: providerStore.connections,
+    connections: providerStore.connectionsForOwner(auth.session.sub),
   });
 }
 
@@ -36,6 +38,14 @@ export async function POST(req: Request) {
     creditorName?: string;
     reference?: string;
   };
+
+  // Any action that names an application must prove the caller owns it. Without
+  // this, an authenticated provider could issue link tokens, complete bank
+  // links, and initiate open-banking payments against another provider's
+  // application (D-09).
+  if (body.applicationId && !providerStore.ownedBy(body.applicationId, auth.session.sub)) {
+    return forbidden("This application belongs to a different provider.");
+  }
 
   if (body.action === "link_token") {
     if (!body.applicationId) return NextResponse.json({ error: "applicationId required" }, { status: 400 });

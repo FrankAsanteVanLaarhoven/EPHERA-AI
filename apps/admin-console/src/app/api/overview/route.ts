@@ -59,8 +59,11 @@ export async function GET() {
     },
     kpis: {
       activeUsers24h: store.devices.reduce((s, d) => s + d.activeToday, 0),
-      txVolume24hMinor: vol + 2_450_000_00,
-      txCount24h: 12840,
+      // Derived from the seed transactions, not padded. These previously added a
+      // hardcoded GH₵2,450,000 to the volume and reported a constant count of
+      // 12,840 — invented headline numbers on a Super Admin console.
+      txVolume24hMinor: vol,
+      txCount24h: store.transactions.length,
       failRate: (txFail / txTotal) * 100,
       openWorkflowErrors: failed,
       providersOnline: online,

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { sessionFromRequest, unauthorised } from "@/lib/session";
+import { forbidden, sessionFromRequest, unauthorised } from "@/lib/session";
 import { providerStore } from "@/lib/store";
 import type { ComplianceDocType, CountryCode } from "@ephera/connect-layer";
 
@@ -20,6 +20,11 @@ export async function POST(req: Request) {
   };
   if (!body.applicationId || !body.type || !body.title || !body.fileName) {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
+  }
+  // A provider may only attach documents to its own application, not to
+  // another provider's by guessed id (D-09).
+  if (!providerStore.ownedBy(body.applicationId, auth.session.sub)) {
+    return forbidden("This application belongs to a different provider.");
   }
   const doc = providerStore.addDocument(body.applicationId, {
     type: body.type,

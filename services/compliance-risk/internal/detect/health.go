@@ -92,6 +92,16 @@ func (m *Monitor) Evaluate(now time.Time) (State, string) {
 	upper := m.baseline.ExpectedFlagRate * m.baseline.Tolerance
 	lower := m.baseline.ExpectedFlagRate / m.baseline.Tolerance
 
+	// A fallback is one-way. Once fallen back, only Recover() — which takes an
+	// operator — returns the detector to service. A single in-tolerance window
+	// must NOT auto-promote it back to Healthy: that would defeat the whole
+	// point of the operator gate, because the second failure would look exactly
+	// like the first and nothing would have been constrained. This is the
+	// property the package comment claims ("nothing here promotes itself"); it
+	// was previously false because the in-tolerance branch below set Healthy
+	// unconditionally.
+	alreadyFallenBack := m.state == FallenBack
+
 	switch {
 	case rate > upper:
 		m.state, m.since = FallenBack, now
@@ -104,6 +114,13 @@ func (m *Monitor) Evaluate(now time.Time) (State, string) {
 		m.state, m.since = FallenBack, now
 		m.reason = fmt.Sprintf(
 			"flagging %.1f%% against an expected %.1f%%; a detector that has gone quiet is indistinguishable from a quiet day and must not be assumed healthy",
+			rate*100, m.baseline.ExpectedFlagRate*100)
+	case alreadyFallenBack:
+		// In tolerance again, but a fallen-back detector does not reinstate
+		// itself on a calm window. It stays out of service until an operator
+		// calls Recover().
+		m.reason = fmt.Sprintf(
+			"window is in tolerance (%.1f%% against an expected %.1f%%), but the detector remains fallen back until an operator returns it to service",
 			rate*100, m.baseline.ExpectedFlagRate*100)
 	default:
 		m.state = Healthy

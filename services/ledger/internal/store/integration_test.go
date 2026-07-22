@@ -45,6 +45,9 @@ func testStore(t *testing.T) *Store {
 	}
 	testSigner = priv
 	st.SetAuthorisationKey(pub)
+	// The test harness mints sandbox-authenticator grants, so the test store is
+	// a sandbox. Production ledgers leave this closed.
+	st.AllowSandboxMethod(true)
 	return st
 }
 
@@ -727,5 +730,32 @@ func TestReceiptsAreImmutable(t *testing.T) {
 	}
 	if _, err := st.pool.Exec(ctx, `DELETE FROM receipts WHERE id = $1`, rec.ID); err == nil {
 		t.Fatal("a receipt was deleted")
+	}
+}
+
+// A grant minted with the sandbox authenticator must be refused by a ledger
+// that has not opted in — the money path fails closed on a sandbox
+// authorisation. authgrant.Verify does not check the method, so the ledger must.
+func TestSandboxAuthenticatorGrantRefusedByDefault(t *testing.T) {
+	st := testStore(t)
+	st.AllowSandboxMethod(false) // a production-shaped ledger
+	ctx := context.Background()
+
+	from := openWallet(t, st, "GHS", 100_000)
+	to := openWallet(t, st, "GHS", 0)
+	req := authorised(t, TransferRequest{ // authorised() mints a sandbox-method grant
+		FromExternalRef: from, ToExternalRef: to, AmountMinor: 10_000, Currency: "GHS",
+		TransferID: "tx_" + uuid.NewString(), IdempotencyKey: "idem_" + uuid.NewString(),
+	})
+	_, err := st.CaptureTransfer(ctx, req)
+	if !errors.Is(err, ErrUnauthorised) {
+		t.Fatalf("a sandbox-authenticator grant posted money on a closed ledger: %v", err)
+	}
+
+	// The same ledger, opted in, accepts it — so the refusal is the gate, not a
+	// broken grant.
+	st.AllowSandboxMethod(true)
+	if _, err := st.CaptureTransfer(ctx, req); err != nil {
+		t.Fatalf("sandbox grant refused even after opting in: %v", err)
 	}
 }

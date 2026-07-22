@@ -50,20 +50,29 @@ export function validatePaymentIntent(intent: PaymentIntent): ValidationIssue[] 
     });
   }
 
-  if (intent.name === "send_money") {
+  // Every intent that moves or commits money must be validated, not only
+  // send_money. Previously the amount, recipient and low-confidence checks were
+  // inside `if (name === "send_money")`, so pay_bill, buy_airtime,
+  // move_to_savings and the rest passed with a missing or negative amount and
+  // confidence 0 — and payment-sdk builds an authorise panel unless a
+  // low_confidence issue is present, so it would have offered to authorise a
+  // low-confidence bill payment.
+  if (MONEY_MOVING_INTENTS.has(intent.name)) {
     if (!intent.amount) {
-      issues.push({ code: "missing_amount", message: "send_money requires amount", field: "amount" });
+      issues.push({ code: "missing_amount", message: `${intent.name} requires an amount`, field: "amount" });
     } else {
       issues.push(...validateMoney(intent.amount));
     }
-    if (!intent.recipient?.displayName && !intent.recipient?.mobileNumber) {
-      issues.push({
-        code: "missing_recipient",
-        message: "send_money requires a recipient",
-        field: "recipient",
-      });
+    if (RECIPIENT_REQUIRED_INTENTS.has(intent.name)) {
+      if (!intent.recipient?.displayName && !intent.recipient?.mobileNumber) {
+        issues.push({
+          code: "missing_recipient",
+          message: `${intent.name} requires a recipient`,
+          field: "recipient",
+        });
+      }
     }
-    if (intent.confidence < 0.75) {
+    if (intent.confidence < LOW_CONFIDENCE_THRESHOLD) {
       issues.push({
         code: "low_confidence",
         message: "confidence too low — require clarification before panel authorise",
@@ -74,6 +83,28 @@ export function validatePaymentIntent(intent: PaymentIntent): ValidationIssue[] 
 
   return issues;
 }
+
+// Intents that move or commit money. Each carries an amount and must clear the
+// low-confidence gate before any authorise panel is offered.
+const MONEY_MOVING_INTENTS: ReadonlySet<PaymentIntent["name"]> = new Set([
+  "send_money",
+  "request_money",
+  "pay_bill",
+  "buy_airtime",
+  "move_to_savings",
+  "create_payment_link",
+  "create_merchant_checkout",
+  "quote_domestic",
+  "quote_cross_border",
+]);
+
+// Of those, the ones that also require a named recipient.
+const RECIPIENT_REQUIRED_INTENTS: ReadonlySet<PaymentIntent["name"]> = new Set([
+  "send_money",
+  "request_money",
+]);
+
+const LOW_CONFIDENCE_THRESHOLD = 0.75;
 
 export function canAuthoriseFromVoiceAlone(): false {
   // Hard product rule — encoded as type + runtime.

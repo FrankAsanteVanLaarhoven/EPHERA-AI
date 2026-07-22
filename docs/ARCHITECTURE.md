@@ -275,16 +275,28 @@ distinguish a deceived customer from a happy one, so detection is genuinely
 necessary — but a probabilistic control on the money path means refusing
 legitimate payments on a score, with no signature to appeal to.
 
-Measured on 590,540 real transactions
-([study](research/bounded-authority-study.md),
-[notebook](../notebooks/fraud-detection-ieee-cis.ipynb)):
-
-| | Bounded authority | Detection |
+| | Bounded authority | Detection (the shipped engine) |
 | --- | --- | --- |
-| Latency | 3.11 ms p50 | asynchronous |
-| Throughput | ~21,000/s (saturating) | n/a |
-| False positives | none possible | budgeted; 1% review → 24.5% of fraud caught |
-| Time dependence | none | recall at fixed capacity fell ~⅓ across the held-out period |
+| Latency | 3.11 ms p50 (measured, [study](research/bounded-authority-study.md)) | asynchronous |
+| Throughput | ~21,000/s, saturating (measured) | n/a |
+| False positives | none possible | budgeted, but **accuracy is unmeasured** — there is no labelled fraud data ([TRUST.md](TRUST.md)) |
+| Time dependence | none | expected to decay; not measured on production data |
+
+**A caveat this document previously got wrong.** The shipped detection engine
+(`compliance-risk/internal/fraud`) is an unsupervised APP-fraud engine whose
+accuracy is **not measured** — the platform has no labelled fraud data, and its
+benchmark checks for regressions, not performance. That is the honest position
+and it is stated in [TRUST.md](TRUST.md).
+
+Separately, the repository contains a **standalone supervised study**
+([notebook](../notebooks/fraud-detection-ieee-cis.ipynb)) that trains a model on
+the *labelled* IEEE-CIS card-fraud dataset and reports figures like "1% review →
+~24.5% of fraud caught" and a recall decline across the held-out period. That is
+a **different model on a different problem** — mostly *unauthorised* card fraud,
+not the authorised-push category this section's diagram places under Detection —
+and its numbers are **not** the shipped engine's performance. An earlier version
+of this table presented them as such, and cited the bounded-authority study for
+them, which does not contain them. Both corrected here.
 
 ---
 
