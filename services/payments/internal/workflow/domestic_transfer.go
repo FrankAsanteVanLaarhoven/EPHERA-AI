@@ -52,32 +52,32 @@ func DomesticTransferSim(ctx workflow.Context, in DomesticTransferInput) (Domest
 		return DomesticTransferResult{TransferID: in.TransferID, Status: "failed", Message: err.Error()}, err
 	}
 
-	var exec adapter.ExecutionResult
-	if err := workflow.ExecuteActivity(ctx, acts.ExecuteRail, in).Get(ctx, &exec); err != nil {
-		_ = workflow.ExecuteActivity(ctx, acts.ReleaseLedgerHold, holdID).Get(ctx, nil)
-		return DomesticTransferResult{TransferID: in.TransferID, Status: "failed", Message: err.Error()}, err
-	}
-
-	if exec.Status == "failed" {
-		_ = workflow.ExecuteActivity(ctx, acts.ReleaseLedgerHold, holdID).Get(ctx, nil)
-		recSummary := fmt.Sprintf("Failed send of %d %s to %s", in.AmountMinor, in.Currency, in.RecipientName)
-		var rec Receipt
-		_ = workflow.ExecuteActivity(ctx, acts.CreateReceipt, in.TransferID, "failed", exec.ProviderRef, in.AuthorisationRef, recSummary).Get(ctx, &rec)
-		return DomesticTransferResult{
-			TransferID:   in.TransferID,
-			Status:       "failed",
-			ExecutionID:  exec.ExecutionID,
-			ProviderRef:  exec.ProviderRef,
-			FeeMinor:     in.FeeMinor,
-			RouteSummary: q.RouteSummary,
-			ReceiptID:    rec.ID,
-			Message:      exec.Message,
-		}, nil
-	}
-
+	// Capture is the settlement, and it happens BEFORE the rail. The ledger
+	// debits the sender, credits the recipient, consumes the grant single-use,
+	// and writes the receipt, all in one transaction. Previously the rail ran
+	// first and capture last, so an irreversible delivery could precede the
+	// ledger record (H1) and a capture failure left the hold stranded (H2). Now,
+	// if capture fails, nothing has been delivered: release the hold and stop.
 	var journalID string
 	if err := workflow.ExecuteActivity(ctx, acts.CaptureLedger, in, holdID, in.FeeMinor).Get(ctx, &journalID); err != nil {
+		_ = workflow.ExecuteActivity(ctx, acts.ReleaseLedgerHold, holdID).Get(ctx, nil)
 		return DomesticTransferResult{TransferID: in.TransferID, Status: "failed", Message: err.Error()}, err
+	}
+
+	// Settled. The rail is a post-settlement delivery step. In the internal-
+	// wallet model the recipient already holds the funds, so a rail failure does
+	// NOT unsettle the transfer — it is recorded as a delivery status so a real
+	// external-rail integration can reconcile. For an external recipient this is
+	// where a reversal would go (docs/design/money-path-settlement.md). The hold
+	// is already captured, so there is nothing to release here.
+	delivery := "delivered"
+	var exec adapter.ExecutionResult
+	if err := workflow.ExecuteActivity(ctx, acts.ExecuteRail, in).Get(ctx, &exec); err != nil {
+		delivery = "delivery_failed"
+		logger.Error("delivery failed after settlement", "transfer", in.TransferID, "error", err)
+	} else if exec.Status == "failed" {
+		delivery = "delivery_failed"
+		logger.Error("delivery rejected after settlement", "transfer", in.TransferID, "message", exec.Message)
 	}
 
 	summary := fmt.Sprintf("Sent %d %s minor units to %s via %s. Fee %d. Journal %s. %s",
@@ -90,6 +90,7 @@ func DomesticTransferSim(ctx workflow.Context, in DomesticTransferInput) (Domest
 	return DomesticTransferResult{
 		TransferID:     in.TransferID,
 		Status:         "settled",
+		DeliveryStatus: delivery,
 		ExecutionID:    exec.ExecutionID,
 		ProviderRef:    exec.ProviderRef,
 		FeeMinor:       in.FeeMinor,

@@ -1,22 +1,39 @@
 # Design proposal: money-path ordering and settlement
 
-**Status: Option A IMPLEMENTED (commit pending). Option B awaiting decision.**
+**Status: IMPLEMENTED for the internal-wallet model (H1, H2, H8 closed). The
+external-recipient variant remains a future milestone.**
 
-Update: the signature-before-rail step (Option A / H1) has been implemented and
-tested — `RequireAuthorisation` now verifies the grant signature and binding
-before any hold or rail, and fails closed with no key configured. A forged-
-signature grant is refused before the rail, proven by a test. Option B (the
-capture-before-rail settlement reorder, which fully closes H2) still needs the
-decision below.
+Update: the investigation resolved the settlement model. A domestic-transfer
+recipient (`user:ama:GHS`) is a **real internal ledger wallet**, and the rail
+sim moves no external money — so the ledger capture IS the settlement and the
+rail is a post-settlement delivery notification. That made the correct fix the
+**capture-before-rail reorder without a suspense account**, now implemented:
+
+- **H1 — closed.** Signature verified before the rail, fail-closed.
+- **H2 — closed.** Capture runs before the rail; a capture failure releases the
+  hold and stops (nothing delivered). A rail failure *after* settlement no longer
+  strands a hold — the money has moved to the recipient's wallet, so the transfer
+  stays settled and the delivery is recorded as `delivery_failed` for
+  reconciliation.
+- **H8 — closed.** The rail sim is idempotent on the idempotency key, so a
+  Temporal retry cannot deliver twice.
+
+All covered by tests (settled+delivered; failed-rail-stays-settled;
+erroring-rail-stays-settled; failed-capture-releases-hold; rail-idempotent).
+
+The one thing still open is the **external-recipient variant** below: when a
+recipient is a genuinely external mobile-money account rather than an internal
+wallet, a rail failure after capture needs a reversal, which needs a settlement
+suspense account. That is a real future milestone, not a defect in the current
+internal-wallet model.
 
 This is the one red-team finding I did not fix in place, because the correct fix
 changes settlement semantics and should be agreed before it is written. It
 covers three coupled findings:
 
-- **H1 — DONE.** ~~the irreversible rail executes before the grant signature is verified.~~ Fixed: signature verified before the rail, fail-closed, tested.
-- **H2** — a capture failure does not release the hold (compensation gap).
-- **H8** (related) — the rail adapter ignores the idempotency key, so a retry can
-  pay twice.
+- **H1 — DONE.** Signature verified before the rail, fail-closed, tested.
+- **H2 — DONE.** Capture precedes the rail; capture failure releases the hold; rail failure after settlement is recorded, not stranded.
+- **H8 — DONE.** The rail sim honours the idempotency key; a retry returns the first result rather than delivering twice.
 
 ---
 

@@ -14,10 +14,13 @@ import (
 type Sim struct {
 	mu    sync.Mutex
 	store map[string]adapter.ExecutionResult
+	// byKey deduplicates executions by idempotency key so a retry does not
+	// deliver twice.
+	byKey map[string]adapter.ExecutionResult
 }
 
 func NewSim() *Sim {
-	return &Sim{store: make(map[string]adapter.ExecutionResult)}
+	return &Sim{store: make(map[string]adapter.ExecutionResult), byKey: make(map[string]adapter.ExecutionResult)}
 }
 
 func (s *Sim) Name() string { return "mobile-money-sim" }
@@ -45,6 +48,21 @@ func (s *Sim) Quote(_ context.Context, amountMinor int64, currency, receiveCurre
 func (s *Sim) Execute(ctx context.Context, req adapter.ExecutionRequest) (adapter.ExecutionResult, error) {
 	if req.AuthorisationRef == "" {
 		return adapter.ExecutionResult{}, fmt.Errorf("missing authorisation evidence")
+	}
+
+	// Idempotency (H8). A rail is the one operation that most needs it: Temporal
+	// retries an activity up to its maximum attempts, and a payout that succeeded
+	// but whose result was lost to a timeout would otherwise be executed again.
+	// A real provider double-pays; this sim used to as well, minting a fresh
+	// execution each call. Keyed by the idempotency key, a repeat returns the
+	// first result rather than delivering twice.
+	if req.IdempotencyKey != "" {
+		s.mu.Lock()
+		prev, ok := s.byKey[req.IdempotencyKey]
+		s.mu.Unlock()
+		if ok {
+			return prev, nil
+		}
 	}
 	if req.FailMode == "reject" {
 		return adapter.ExecutionResult{
@@ -77,6 +95,9 @@ func (s *Sim) Execute(ctx context.Context, req adapter.ExecutionRequest) (adapte
 	}
 	s.mu.Lock()
 	s.store[res.ExecutionID] = res
+	if req.IdempotencyKey != "" {
+		s.byKey[req.IdempotencyKey] = res
+	}
 	s.mu.Unlock()
 	return res, nil
 }

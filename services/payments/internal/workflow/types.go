@@ -21,8 +21,15 @@ type DomesticTransferInput struct {
 }
 
 type DomesticTransferResult struct {
-	TransferID     string `json:"transferId"`
-	Status         string `json:"status"`
+	TransferID string `json:"transferId"`
+	// Status is the settlement state on the ledger: settled, failed or denied.
+	Status string `json:"status"`
+	// DeliveryStatus is the outcome of the post-settlement rail (external
+	// delivery). A settled transfer whose delivery failed is settled on the
+	// ledger — the recipient holds the funds in the internal-wallet model — but
+	// carries a delivery_failed status so a real external-rail integration can
+	// reconcile. Empty for transfers that did not reach the rail.
+	DeliveryStatus string `json:"deliveryStatus,omitempty"`
 	ExecutionID    string `json:"executionId"`
 	ProviderRef    string `json:"providerRef"`
 	FeeMinor       int64  `json:"feeMinor"`

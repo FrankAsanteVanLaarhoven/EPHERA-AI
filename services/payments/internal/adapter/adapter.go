@@ -20,14 +20,14 @@ type Quote struct {
 
 // ExecutionRequest is only valid after cryptographic authorisation evidence exists.
 type ExecutionRequest struct {
-	TransferID         string `json:"transferId"`
-	IdempotencyKey     string `json:"idempotencyKey"`
-	AmountMinor        int64  `json:"amountMinor"`
-	Currency           string `json:"currency"`
-	RecipientHint      string `json:"recipientHint"`
-	RecipientName      string `json:"recipientName"`
-	AuthorisationRef   string `json:"authorisationRef"`
-	FailMode           string `json:"failMode,omitempty"` // empty | timeout | reject
+	TransferID       string `json:"transferId"`
+	IdempotencyKey   string `json:"idempotencyKey"`
+	AmountMinor      int64  `json:"amountMinor"`
+	Currency         string `json:"currency"`
+	RecipientHint    string `json:"recipientHint"`
+	RecipientName    string `json:"recipientName"`
+	AuthorisationRef string `json:"authorisationRef"`
+	FailMode         string `json:"failMode,omitempty"` // empty | timeout | reject
 }
 
 type ExecutionResult struct {

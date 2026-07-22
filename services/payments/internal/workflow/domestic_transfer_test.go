@@ -89,9 +89,12 @@ func TestTransferSettlesAndCaptures(t *testing.T) {
 	}
 }
 
-// The compensation path. A rail that reports failure must release the hold, and
-// must not capture: the money never moved, so the reservation must not stand.
-func TestFailedRailReleasesTheHoldAndDoesNotCapture(t *testing.T) {
+// A rail that fails AFTER settlement does not unsettle the transfer. Capture is
+// the settlement and runs first; in the internal-wallet model the recipient
+// already holds the funds, so the rail is a delivery notification. Its failure
+// is recorded as a delivery status rather than reversing money that has moved,
+// and the hold — already captured — is not released.
+func TestFailedRailAfterSettlementStaysSettled(t *testing.T) {
 	env := newEnv(t)
 	in := input()
 
@@ -100,37 +103,38 @@ func TestFailedRailReleasesTheHoldAndDoesNotCapture(t *testing.T) {
 	env.OnActivity(acts.RequireAuthorisation, mock.Anything, mock.Anything).Return(nil).Once()
 	env.OnActivity(acts.PostLedgerHold, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).Return("hold_2", nil).Once()
+	env.OnActivity(acts.CaptureLedger, mock.Anything, mock.Anything, "hold_2", mock.Anything).
+		Return("je_2", nil).Once()
 	env.OnActivity(acts.ExecuteRail, mock.Anything, mock.Anything).
 		Return(adapter.ExecutionResult{ExecutionID: "mm_2", Status: "failed",
 			Message: "simulated provider rejection"}, nil).Once()
-
-	// The assertion that matters: the exact hold is released.
-	env.OnActivity(acts.ReleaseLedgerHold, mock.Anything, "hold_2").Return(nil).Once()
-	env.OnActivity(acts.CreateReceipt, mock.Anything, in.TransferID, "failed",
+	env.OnActivity(acts.CreateReceipt, mock.Anything, in.TransferID, "settled",
 		mock.Anything, mock.Anything, mock.Anything).
-		Return(Receipt{ID: "rcpt_2", Status: "failed"}, nil).Once()
+		Return(Receipt{ID: "rcpt_2", Status: "settled"}, nil).Once()
+	// ReleaseLedgerHold is deliberately NOT mocked: the hold was captured, so if
+	// the workflow tried to release it the environment would fail.
 
 	env.ExecuteWorkflow(DomesticTransferSim, in)
 
 	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("a failed rail should not fail the workflow: %v", err)
+		t.Fatalf("a failed delivery should not fail a settled transfer: %v", err)
 	}
 	var out DomesticTransferResult
 	_ = env.GetWorkflowResult(&out)
-	if out.Status != "failed" {
-		t.Fatalf("status %q", out.Status)
+	if out.Status != "settled" {
+		t.Fatalf("status %q; the money moved, so the transfer is settled", out.Status)
 	}
-	if out.JournalEntryID != "" {
-		t.Fatalf("a failed payment produced a journal entry: %q", out.JournalEntryID)
+	if out.DeliveryStatus != "delivery_failed" {
+		t.Fatalf("delivery status %q; a failed rail should be recorded", out.DeliveryStatus)
 	}
-	// CaptureLedger was never mocked; if the workflow called it the environment
-	// would fail on an unexpected activity.
+	if out.JournalEntryID != "je_2" {
+		t.Fatalf("a settled transfer lost its journal entry: %q", out.JournalEntryID)
+	}
 }
 
-// A rail that errors outright — rather than returning a failed result — must
-// also release the hold. This is the path a timeout or an unreachable provider
-// takes, and it is the easier one to get wrong.
-func TestErroringRailAlsoReleasesTheHold(t *testing.T) {
+// A rail that errors outright — a timeout or an unreachable provider — after
+// settlement is the same case: the transfer is settled, the delivery is flagged.
+func TestErroringRailAfterSettlementStaysSettled(t *testing.T) {
 	env := newEnv(t)
 
 	env.OnActivity(acts.Quote, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
@@ -138,15 +142,55 @@ func TestErroringRailAlsoReleasesTheHold(t *testing.T) {
 	env.OnActivity(acts.RequireAuthorisation, mock.Anything, mock.Anything).Return(nil).Once()
 	env.OnActivity(acts.PostLedgerHold, mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).Return("hold_3", nil).Once()
+	env.OnActivity(acts.CaptureLedger, mock.Anything, mock.Anything, "hold_3", mock.Anything).
+		Return("je_3", nil).Once()
 	env.OnActivity(acts.ExecuteRail, mock.Anything, mock.Anything).
 		Return(adapter.ExecutionResult{}, temporal.NewNonRetryableApplicationError(
 			"provider unreachable", "rail_error", errors.New("dial failed"))).Once()
-	env.OnActivity(acts.ReleaseLedgerHold, mock.Anything, "hold_3").Return(nil).Once()
+	env.OnActivity(acts.CreateReceipt, mock.Anything, mock.Anything, "settled",
+		mock.Anything, mock.Anything, mock.Anything).
+		Return(Receipt{ID: "rcpt_3", Status: "settled"}, nil).Once()
+
+	env.ExecuteWorkflow(DomesticTransferSim, input())
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("an erroring delivery should not fail a settled transfer: %v", err)
+	}
+	var out DomesticTransferResult
+	_ = env.GetWorkflowResult(&out)
+	if out.Status != "settled" || out.DeliveryStatus != "delivery_failed" {
+		t.Fatalf("status %q delivery %q", out.Status, out.DeliveryStatus)
+	}
+}
+
+// A capture that fails releases the hold and stops before the rail. Nothing is
+// delivered, so the reservation must not stand (H2). This is the compensation
+// path now that capture precedes the rail.
+func TestFailedCaptureReleasesTheHold(t *testing.T) {
+	env := newEnv(t)
+
+	env.OnActivity(acts.Quote, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(quoteResult(), nil).Once()
+	env.OnActivity(acts.RequireAuthorisation, mock.Anything, mock.Anything).Return(nil).Once()
+	env.OnActivity(acts.PostLedgerHold, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, mock.Anything).Return("hold_4", nil).Once()
+	env.OnActivity(acts.CaptureLedger, mock.Anything, mock.Anything, "hold_4", mock.Anything).
+		Return("", temporal.NewNonRetryableApplicationError(
+			"authorisation grant already used", "grant_used", nil)).Once()
+	// The assertion that matters: the exact hold is released.
+	env.OnActivity(acts.ReleaseLedgerHold, mock.Anything, "hold_4").Return(nil).Once()
+	// ExecuteRail is deliberately NOT mocked: capture failed, so nothing is
+	// delivered. If the workflow ran the rail the environment would fail.
 
 	env.ExecuteWorkflow(DomesticTransferSim, input())
 
 	if env.GetWorkflowError() == nil {
-		t.Fatal("an erroring rail should surface as a workflow error")
+		t.Fatal("a failed capture was reported as success")
+	}
+	var out DomesticTransferResult
+	_ = env.GetWorkflowResult(&out)
+	if out.JournalEntryID != "" {
+		t.Fatalf("a failed capture produced a journal entry: %q", out.JournalEntryID)
 	}
 }
 
@@ -207,24 +251,32 @@ func TestFeeComesFromThePreparedTransferNotTheQuote(t *testing.T) {
 	}
 }
 
-// A capture that fails must surface. Silently returning success here would
-// report a settled payment that the ledger never recorded.
-func TestFailedCaptureFailsTheWorkflow(t *testing.T) {
+// The happy path proves settlement precedes delivery: the reordered workflow
+// captures, then delivers, and reports settled + delivered.
+func TestSettledTransferReportsDelivered(t *testing.T) {
 	env := newEnv(t)
+	in := input()
 
 	env.OnActivity(acts.Quote, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(quoteResult(), nil).Once()
 	env.OnActivity(acts.RequireAuthorisation, mock.Anything, mock.Anything).Return(nil).Once()
 	env.OnActivity(acts.PostLedgerHold, mock.Anything, mock.Anything, mock.Anything,
-		mock.Anything, mock.Anything, mock.Anything).Return("hold_5", nil).Once()
+		mock.Anything, mock.Anything, mock.Anything).Return("hold_6", nil).Once()
+	env.OnActivity(acts.CaptureLedger, mock.Anything, mock.Anything, "hold_6", mock.Anything).
+		Return("je_6", nil).Once()
 	env.OnActivity(acts.ExecuteRail, mock.Anything, mock.Anything).Return(settledRail(), nil).Once()
-	env.OnActivity(acts.CaptureLedger, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return("", temporal.NewNonRetryableApplicationError(
-			"authorisation grant already used", "grant_used", nil)).Once()
+	env.OnActivity(acts.CreateReceipt, mock.Anything, in.TransferID, "settled",
+		mock.Anything, mock.Anything, mock.Anything).
+		Return(Receipt{ID: "rcpt_6", Status: "settled"}, nil).Once()
 
-	env.ExecuteWorkflow(DomesticTransferSim, input())
+	env.ExecuteWorkflow(DomesticTransferSim, in)
 
-	if env.GetWorkflowError() == nil {
-		t.Fatal("a failed capture was reported as success")
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("workflow error: %v", err)
+	}
+	var out DomesticTransferResult
+	_ = env.GetWorkflowResult(&out)
+	if out.Status != "settled" || out.DeliveryStatus != "delivered" || out.JournalEntryID != "je_6" {
+		t.Fatalf("result %+v", out)
 	}
 }
