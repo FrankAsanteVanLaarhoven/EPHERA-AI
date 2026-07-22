@@ -3,9 +3,9 @@
 **Scope:** customer verification, the limits that follow from it, screening, and
 review cases — owned by a service instead of a device.
 **Exit condition (programme):** end-to-end compliance sandbox.
-**Verdict:** PASS WITH LIMITATIONS — verification, limits and screening are
-enforced; KYB and KYA exist and evidence is real. Behavioural monitoring and an
-analyst console do not. See section 9.
+**Verdict:** PASS WITH LIMITATIONS — verification, limits, screening, KYB, KYA,
+evidence and behavioural monitoring are in place. There is no analyst console
+and no document storage. See section 9.
 
 ## 1. Evidence and assumptions
 
@@ -48,7 +48,7 @@ subject can write.
 
 | Command | Result |
 | --- | --- |
-| `go test ./...` in `services/compliance-risk` | ok — 27 tests |
+| `go test ./...` in `services/compliance-risk` | ok — 41 tests |
 | `go test ./...` in `services/payments` | ok |
 | Every other service, Rust, Python, connect-layer | ok |
 
@@ -88,8 +88,16 @@ route's real method.
   case-folded exact comparison. Real screening consumes a licensed list with
   fuzzy matching, and the service says so in its own health response rather than
   leaving it to be assumed.
-- **Monitoring is per-payment, not behavioural.** There is no profiling, no
-  structuring detection, no network analysis.
+- **Monitoring covers three behavioural patterns**, not a model: structuring
+  (payments clustered just below the reporting threshold), unusual velocity, and
+  rapid dispersal across many recipients. There is no profiling, no peer-group
+  comparison and no network analysis. The thresholds are configuration, not
+  learned.
+- Alerts **hold for review, they do not deny**. A pattern is suggestive, not
+  conclusive: a customer paying eleven people in an hour might be settling a
+  group holiday, and denying on a pattern punishes that case. Every alert
+  carries the observation that produced it, because "structuring" alone is an
+  accusation an analyst cannot check and a customer cannot answer.
 - **Cases have no console.** They are raised and closable over the API; no
   compliance console exists to work them.
 - The ledger does not consult compliance. The orchestrator does, at prepare, so
@@ -131,6 +139,11 @@ with a record rather than a recompiled constant. A subject cannot verify their
 own document, and tiers do not cross subject types: a business cannot be given a
 person's tier.
 
-It is still not an end-to-end compliance sandbox. There is no behavioural
-monitoring, no console for analysts to work cases, and the document bytes are
-not stored. Those are the rest of G3 and G7.
+Behavioural monitoring followed. Three payments of 900000, 920000 and 950000 —
+each individually allowed, each within the customer's limits — are held on the
+third with `possible_structuring: 3 payments between 850000 and 1000000 within
+24h`, and the case an analyst opens carries that same observation.
+
+It is still not an end-to-end compliance sandbox. There is no console for
+analysts to work cases, and document bytes are not stored. Those are the rest of
+G3 and G7.

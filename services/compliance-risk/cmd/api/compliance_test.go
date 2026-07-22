@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -446,4 +447,115 @@ func TestTiersDoNotCrossSubjectTypes(t *testing.T) {
 	if code == http.StatusOK {
 		t.Fatal("a business was given a person's tier")
 	}
+}
+
+// --- behavioural monitoring ---
+
+// A sequence of payments just under the reporting threshold is held for review,
+// even though each one is individually within the customer's limits.
+func TestStructuringSequenceIsHeldForReview(t *testing.T) {
+	h := newHarness(t)
+	h.verify(t, "premium") // single limit 1,000,000; threshold is 1,000,000
+
+	// Establish each recipient with a small payment first. A large payment to
+	// someone never paid before is held on its own terms, so without this the
+	// sequence never reaches "allowed" and there is no history to see a pattern
+	// in — which is itself the new-recipient rule working.
+	for _, r := range []string{"Recipient One", "Recipient Two", "Recipient Three"} {
+		if d := h.decide(t, 1_000, r); d["outcome"] != "allow" {
+			t.Fatalf("establishing %s: %v %v", r, d["outcome"], d["reasons"])
+		}
+	}
+
+	// Now three payments in the band just below the reporting threshold. Each
+	// is allowed on its own terms.
+	first := h.decide(t, 900_000, "Recipient One")
+	if first["outcome"] != "allow" {
+		t.Fatalf("first payment: %v %v", first["outcome"], first["reasons"])
+	}
+	second := h.decide(t, 920_000, "Recipient Two")
+	if second["outcome"] != "allow" {
+		t.Fatalf("second payment: %v %v", second["outcome"], second["reasons"])
+	}
+
+	third := h.decide(t, 950_000, "Recipient Three")
+	if third["outcome"] != "review" {
+		t.Fatalf("third payment was not held: %v %v", third["outcome"], third["reasons"])
+	}
+	if !anyReasonHasPrefix(third, "possible_structuring") {
+		t.Fatalf("no structuring reason: %v", third["reasons"])
+	}
+}
+
+// The reason must carry the observation, so an analyst can check it and a
+// customer can answer it.
+func TestMonitoringReasonsCarryTheObservation(t *testing.T) {
+	h := newHarness(t)
+	h.verify(t, "premium")
+	for _, r := range []string{"One", "Two", "Three"} {
+		h.decide(t, 1_000, r)
+	}
+	h.decide(t, 900_000, "One")
+	h.decide(t, 920_000, "Two")
+	d := h.decide(t, 950_000, "Three")
+
+	for _, r := range d["reasons"].([]any) {
+		s := r.(string)
+		if len(s) > len("possible_structuring:") && s[:len("possible_structuring:")] == "possible_structuring:" {
+			if !strings.Contains(s, "payments between") {
+				t.Fatalf("observation missing from reason: %q", s)
+			}
+			return
+		}
+	}
+	t.Fatalf("no structuring reason found: %v", d["reasons"])
+}
+
+// Ordinary spending well below the threshold is not held.
+func TestOrdinarySpendingIsNotHeld(t *testing.T) {
+	h := newHarness(t)
+	h.verify(t, "verified")
+	for i := 0; i < 3; i++ {
+		d := h.decide(t, 5_000, "Ama Mensah")
+		if d["outcome"] != "allow" {
+			t.Fatalf("ordinary payment %d held: %v %v", i, d["outcome"], d["reasons"])
+		}
+	}
+}
+
+// A held payment raises a case carrying the pattern, so a human has the
+// observation rather than just a label.
+func TestStructuringRaisesACaseWithTheObservation(t *testing.T) {
+	h := newHarness(t)
+	h.verify(t, "premium")
+	for _, r := range []string{"One", "Two", "Three"} {
+		h.decide(t, 1_000, r)
+	}
+	h.decide(t, 900_000, "One")
+	h.decide(t, 920_000, "Two")
+	h.decide(t, 950_000, "Three")
+
+	code, body := h.call(t, "GET", "/v1/cases", nil, true)
+	if code != http.StatusOK {
+		t.Fatalf("cases: %d %v", code, body)
+	}
+	for _, it := range body["items"].([]any) {
+		c := it.(map[string]any)
+		if c["subject"] == h.subject && strings.Contains(c["reason"].(string), "possible_structuring") {
+			if !strings.Contains(c["reason"].(string), "payments between") {
+				t.Fatalf("case reason lacks the observation: %v", c["reason"])
+			}
+			return
+		}
+	}
+	t.Fatal("no case raised carrying the structuring observation")
+}
+
+func anyReasonHasPrefix(d map[string]any, prefix string) bool {
+	for _, r := range d["reasons"].([]any) {
+		if s, ok := r.(string); ok && strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
 }

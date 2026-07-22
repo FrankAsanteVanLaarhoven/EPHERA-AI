@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ephera/compliance-risk/internal/monitoring"
 	"github.com/ephera/compliance-risk/internal/risk"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -443,4 +444,32 @@ func coalesce(p *string, fallback string) string {
 		return *p
 	}
 	return fallback
+}
+
+// RecentPayments returns allowed payments for a subject within a window, for
+// behavioural monitoring. Only allowed decisions are returned: a refused
+// attempt says something about intent but nothing about the movement of money,
+// and mixing them would make every alert unexplainable.
+func (s *Store) RecentPayments(ctx context.Context, subject string, window time.Duration) ([]monitoring.Payment, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT amount_minor, recipient, decided_at
+		FROM risk_decisions
+		WHERE subject = $1 AND outcome = 'allow' AND decided_at >= now() - $2::interval
+		ORDER BY decided_at DESC
+		LIMIT 500
+	`, subject, window.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []monitoring.Payment{}
+	for rows.Next() {
+		var p monitoring.Payment
+		if err := rows.Scan(&p.AmountMinor, &p.Recipient, &p.At); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }

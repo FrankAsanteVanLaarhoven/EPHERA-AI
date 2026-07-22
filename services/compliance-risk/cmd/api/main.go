@@ -25,7 +25,9 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/ephera/compliance-risk/internal/monitoring"
 	"github.com/ephera/compliance-risk/internal/risk"
 	"github.com/ephera/compliance-risk/internal/store"
 )
@@ -203,6 +205,28 @@ func (s *server) decide(w http.ResponseWriter, r *http.Request) {
 	}
 	decision := risk.Evaluate(in)
 
+	// Behavioural monitoring looks at the sequence, not this payment alone.
+	// It holds for review rather than denying: a pattern is suggestive, not
+	// conclusive, and denying on one punishes the innocent explanation.
+	thresholds := monitoring.DefaultThresholds()
+	history, err := s.store.RecentPayments(ctx, req.Subject, longestWindow(thresholds))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	alerts := monitoring.Evaluate(time.Now(), monitoring.Payment{
+		AmountMinor: req.AmountMinor,
+		Recipient:   risk.NormaliseName(req.RecipientName),
+		At:          time.Now(),
+	}, history, thresholds)
+
+	if len(alerts) > 0 && decision.Outcome == risk.Allow {
+		decision.Outcome = risk.Review
+	}
+	for _, a := range alerts {
+		decision.Reasons = append(decision.Reasons, a.Rule+":"+a.Observation)
+	}
+
 	// Every decision is recorded, allow or refuse. The allowed ones are also
 	// what the daily total and the known-recipient check are computed from.
 	if err := s.store.RecordDecision(ctx, in, decision); err != nil {
@@ -360,6 +384,20 @@ func (s *server) requirements(w http.ResponseWriter, r *http.Request) {
 		"subject": subject, "subjectType": c.SubjectType,
 		"targetTier": target, "missingEvidence": missing, "eligible": len(missing) == 0,
 	})
+}
+
+// longestWindow is how much history the monitoring rules need. Fetching the
+// longest window once is cheaper than one query per rule, and keeps the rules
+// pure functions over a slice.
+func longestWindow(t monitoring.Thresholds) time.Duration {
+	longest := t.StructuringWindow
+	if t.VelocityWindow > longest {
+		longest = t.VelocityWindow
+	}
+	if t.DispersalWindow > longest {
+		longest = t.DispersalWindow
+	}
+	return longest
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
