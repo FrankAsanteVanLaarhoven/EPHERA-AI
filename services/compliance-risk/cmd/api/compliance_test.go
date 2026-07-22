@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+
+	"github.com/ephera/compliance-risk/internal/detect"
 	"os"
 	"strings"
 	"sync"
@@ -23,6 +25,7 @@ const token = "test-service-token"
 
 type harness struct {
 	srv     *httptest.Server
+	s       *server
 	st      *store.Store
 	subject string
 }
@@ -43,7 +46,7 @@ func newHarness(t *testing.T) *harness {
 	srv := httptest.NewServer(s.routes())
 	t.Cleanup(srv.Close)
 	// A fresh subject per test so daily totals do not leak between runs.
-	return &harness{srv: srv, st: st, subject: fmt.Sprintf("test:%d:GHS", time.Now().UnixNano())}
+	return &harness{srv: srv, s: s, st: st, subject: fmt.Sprintf("test:%d:GHS", time.Now().UnixNano())}
 }
 
 func (h *harness) call(t *testing.T, method, path string, body any, auth bool) (int, map[string]any) {
@@ -632,4 +635,65 @@ func TestDailyLimitHoldsUnderConcurrency(t *testing.T) {
 	}
 	t.Logf("allowed %d of %d concurrent payments, total spent %d of 500,000",
 		allowedCount, n, allowedTotal)
+}
+
+// Situation awareness is wired into decisions as advisory context: a rare
+// payment shape surfaces a situation in the response, without changing the
+// allow/deny outcome. Below the minimum population it stays silent.
+func TestDecideSurfacesRareSituationAdvisory(t *testing.T) {
+	h := newHarness(t)
+	// Enable awareness on the running server and seed enough ordinary payments
+	// that it can make a confident claim.
+	h.s.awareness = detect.NewAwareness(detect.NewPopulation(), 12, 15*time.Minute, 3)
+	for i := 0; i < 600; i++ {
+		h.s.awareness.Assess(detect.Observation{Features: []detect.Feature{
+			{Name: "amount_band", Value: "small"},
+			{Name: "payee_type", Value: "known"},
+			{Name: "hour_band", Value: "day"},
+		}})
+	}
+	h.verify(t, "verified")
+
+	// A very large payment to a brand-new payee — an unusual shape. It is denied
+	// by limits, but awareness runs regardless and must surface the situation.
+	code, body := h.call(t, "POST", "/v1/decisions", map[string]any{
+		"subject": h.subject, "amountMinor": int64(5_000_000_00), "currency": "GHS",
+		"recipientName": "Totally New Payee",
+	}, true)
+	if code != http.StatusOK {
+		t.Fatalf("decide: %d %v", code, body)
+	}
+	sit, ok := body["situationAwareness"].(map[string]any)
+	if !ok {
+		t.Fatalf("a rare payment did not surface situation awareness: %v", body)
+	}
+	if sit["rare"] != true {
+		t.Fatalf("situation present but not marked rare: %v", sit)
+	}
+	if sit["narrative"] == nil || sit["narrative"] == "" {
+		t.Fatal("situation carries no narrative")
+	}
+}
+
+// An ordinary payment carries no situation, and the outcome is unaffected.
+func TestOrdinaryPaymentCarriesNoSituation(t *testing.T) {
+	h := newHarness(t)
+	h.s.awareness = detect.NewAwareness(detect.NewPopulation(), 12, 15*time.Minute, 3)
+	for i := 0; i < 600; i++ {
+		h.s.awareness.Assess(detect.Observation{Features: []detect.Feature{
+			{Name: "amount_band", Value: "small"},
+			{Name: "payee_type", Value: "known"},
+			{Name: "hour_band", Value: "day"},
+		}})
+	}
+	h.verify(t, "verified")
+	// Establish the recipient, then a small ordinary payment to them.
+	h.decide(t, 1_000, "Ama Mensah")
+	_, body := h.call(t, "POST", "/v1/decisions", map[string]any{
+		"subject": h.subject, "amountMinor": int64(1_000), "currency": "GHS",
+		"recipientName": "Ama Mensah",
+	}, true)
+	if body["situationAwareness"] != nil {
+		t.Fatalf("an ordinary payment surfaced a situation: %v", body["situationAwareness"])
+	}
 }

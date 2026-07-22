@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ephera/compliance-risk/internal/detect"
 	"github.com/ephera/compliance-risk/internal/monitoring"
 	"github.com/ephera/compliance-risk/internal/risk"
 	"github.com/ephera/compliance-risk/internal/store"
@@ -35,6 +36,10 @@ import (
 type server struct {
 	store        *store.Store
 	serviceToken string
+	// awareness runs rare-event situation awareness alongside decisions. It is
+	// advisory: it never changes an allow/deny outcome (no probabilistic control
+	// on the money path, ADR 0004) — it logs and surfaces context for a human.
+	awareness *detect.Awareness
 }
 
 func main() {
@@ -54,7 +59,17 @@ func main() {
 			"Calls will be refused until a caller credential is configured.")
 	}
 
-	s := &server{store: st, serviceToken: token}
+	// Situation awareness over the shape of payments. The population builds from
+	// live decisions, so it makes no confident claim until it has seen enough
+	// (detect.MinPopulation): a situation from a small sample is a guess dressed
+	// as an alert. It is a singleton across subjects so it sees cross-payment
+	// clusters, not one subject at a time.
+	aware := detect.NewAwareness(detect.NewPopulation(), 12, 15*time.Minute, 3)
+	aware.OnRare = func(sit detect.Situation) {
+		log.Printf("RARE-EVENT [%s] %s", sit.Priority, sit.Narrative)
+	}
+
+	s := &server{store: st, serviceToken: token, awareness: aware}
 	log.Printf("EPHERA compliance-risk on %s", addr)
 	if err := http.ListenAndServe(addr, s.routes()); err != nil {
 		log.Fatal(err)
@@ -110,9 +125,9 @@ func (s *server) getCustomer(w http.ResponseWriter, r *http.Request) {
 }
 
 type tierRequest struct {
-	Tier        string `json:"tier"`
-	DecidedBy   string `json:"decidedBy"`
-	Reason      string `json:"reason"`
+	Tier      string `json:"tier"`
+	DecidedBy string `json:"decidedBy"`
+	Reason    string `json:"reason"`
 }
 
 func (s *server) setTier(w http.ResponseWriter, r *http.Request) {
@@ -198,6 +213,7 @@ func (s *server) decide(w http.ResponseWriter, r *http.Request) {
 	// recorded outcome — including the behavioural upgrade — is computed inside,
 	// so the row that is written is the final one.
 	var in risk.Input
+	var knownRecipient bool
 	decision, err := s.store.DecideUnderSubjectLock(ctx, req.Subject, req.RecipientName,
 		func(spent int64, known bool) (risk.Input, risk.Decision) {
 			in = risk.Input{
@@ -237,12 +253,62 @@ func (s *server) decide(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"outcome":             string(decision.Outcome),
 		"reasons":             decision.Reasons,
 		"tier":                customer.Tier,
 		"remainingDailyMinor": decision.RemainingDailyMinor,
-	})
+	}
+
+	// Situation awareness (advisory). Feed the payment's shape to the rare-event
+	// detector. It does not gate the payment — the outcome above is already
+	// decided — but a rare situation is logged (via OnRare) and surfaced here so
+	// a human sees the context.
+	if s.awareness != nil {
+		sit := s.awareness.Assess(detect.Observation{
+			Features: []detect.Feature{
+				{Name: "amount_band", Value: amountBand(req.AmountMinor)},
+				{Name: "payee_type", Value: payeeType(knownRecipient)},
+				{Name: "hour_band", Value: hourBand(time.Now())},
+			},
+			At: time.Now(),
+		})
+		if sit.Rare {
+			resp["situationAwareness"] = sit
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// amountBand buckets an amount into coarse categories for rarity scoring.
+// Bucketing keeps rarity computable on modest volumes and keeps the explanation
+// readable ("amount_band=huge" is something a reviewer can check).
+func amountBand(minor int64) string {
+	switch {
+	case minor < 10_000_00: // < 10,000
+		return "small"
+	case minor < 100_000_00: // < 100,000
+		return "medium"
+	case minor < 1_000_000_00: // < 1,000,000
+		return "large"
+	default:
+		return "huge"
+	}
+}
+
+func payeeType(known bool) string {
+	if known {
+		return "known"
+	}
+	return "new"
+}
+
+func hourBand(t time.Time) string {
+	if h := t.UTC().Hour(); h >= 6 && h < 22 {
+		return "day"
+	}
+	return "night"
 }
 
 func (s *server) listCases(w http.ResponseWriter, r *http.Request) {
