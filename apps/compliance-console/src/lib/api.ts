@@ -12,6 +12,7 @@ import {
   decodeCreationOptions,
   decodeRequestOptions,
   encodeAuthenticationCredential,
+  describePasskeyError,
   encodeRegistrationCredential,
   type RawAssertionCredential,
   type RawAttestationCredential,
@@ -68,9 +69,14 @@ export async function registerPasskey(subject: string): Promise<{ ok: boolean; m
   const options = await begin.json();
   const challenge = options.publicKey?.challenge as string;
 
-  const created = (await navigator.credentials.create({
-    publicKey: decodeCreationOptions(options) as unknown as PublicKeyCredentialCreationOptions,
-  })) as PublicKeyCredential | null;
+  let created: PublicKeyCredential | null;
+  try {
+    created = (await navigator.credentials.create({
+      publicKey: decodeCreationOptions(options) as unknown as PublicKeyCredentialCreationOptions,
+    })) as PublicKeyCredential | null;
+  } catch (err) {
+    return { ok: false, message: describePasskeyError(err) };
+  }
   if (!created) return { ok: false, message: "No passkey was created." };
 
   const finish = await identityPost("/v1/passkeys/register/finish", {
@@ -94,9 +100,14 @@ export async function login(subject: string): Promise<{ ok: boolean; message: st
   if (!begin.ok) return { ok: false, message: `Sign-in could not start (${begin.status}).` };
   const { assertion, challenge } = await begin.json();
 
-  const signed = (await navigator.credentials.get({
-    publicKey: decodeRequestOptions(assertion) as unknown as PublicKeyCredentialRequestOptions,
-  })) as PublicKeyCredential | null;
+  let signed: PublicKeyCredential | null;
+  try {
+    signed = (await navigator.credentials.get({
+      publicKey: decodeRequestOptions(assertion) as unknown as PublicKeyCredentialRequestOptions,
+    })) as PublicKeyCredential | null;
+  } catch (err) {
+    return { ok: false, message: describePasskeyError(err) };
+  }
   if (!signed) return { ok: false, message: "Sign-in was cancelled." };
 
   const finish = await identityPost("/v1/operators/session", {
@@ -169,3 +180,5 @@ export async function fetchSubject(subject: string): Promise<Record<string, unkn
     return null;
   }
 }
+
+export { platformAuthenticatorAvailable } from "@ephera/passkeys";

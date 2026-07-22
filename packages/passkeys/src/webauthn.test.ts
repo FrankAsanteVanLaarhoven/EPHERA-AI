@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   base64urlToBytes,
+  describePasskeyError,
   bufferToBase64url,
   decodeCreationOptions,
   decodeRequestOptions,
@@ -122,4 +123,25 @@ test("encodeAuthenticationCredential handles a null userHandle", () => {
     },
   });
   assert.equal(noHandle.response.userHandle, null);
+});
+
+test("passkey failures are described in terms a person can act on", () => {
+  const cases: Array<[string, RegExp]> = [
+    ["NotAllowedError", /dismissed|no authenticator|security key|phone/i],
+    ["InvalidStateError", /already has a passkey/i],
+    ["SecurityError", /origin/i],
+    ["AbortError", /cancelled/i],
+    ["NotSupportedError", /cannot satisfy/i],
+  ];
+  for (const [name, expected] of cases) {
+    const msg = describePasskeyError(Object.assign(new Error("x"), { name }));
+    assert.match(msg, expected, `${name} produced: ${msg}`);
+    // Never leak a bare exception name as the whole message.
+    assert.ok(msg.length > 20, `${name} message too terse: ${msg}`);
+  }
+});
+
+test("an unrecognised failure still names itself rather than going silent", () => {
+  assert.match(describePasskeyError(Object.assign(new Error("x"), { name: "WeirdError" })), /WeirdError/);
+  assert.match(describePasskeyError(undefined), /unknown reason/i);
 });

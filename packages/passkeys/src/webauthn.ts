@@ -133,3 +133,60 @@ export function encodeAuthenticationCredential(
     },
   };
 }
+
+/**
+ * Turn a WebAuthn failure into something a person can act on.
+ *
+ * The browser reports these as DOM exceptions whose names say little on their
+ * own: a user closing the dialog, a machine with no authenticator, and a
+ * mismatched relying-party id all surface differently but are equally opaque as
+ * raw errors. Letting one reach a crash overlay tells the user nothing about
+ * what to do next.
+ */
+export function describePasskeyError(err: unknown): string {
+  const name = (err as { name?: string })?.name ?? "";
+  switch (name) {
+    case "NotAllowedError":
+      // The catch-all the browser uses for "no authenticator was used" —
+      // dismissed, timed out, or nothing available to satisfy the request.
+      return (
+        "No passkey was created or used. Either the prompt was dismissed, or this " +
+        "device has no authenticator available. On a desktop without a fingerprint " +
+        "reader you can still use a security key, or scan the QR code to use your phone."
+      );
+    case "InvalidStateError":
+      return "This device already has a passkey registered for this account. Sign in instead of registering.";
+    case "NotSupportedError":
+      return "This browser cannot satisfy the security requirements for this passkey.";
+    case "SecurityError":
+      return (
+        "The page origin does not match the expected one for this passkey. Open the " +
+        "app on the exact address it is configured for — a passkey registered on " +
+        "localhost will not work on 127.0.0.1, and vice versa."
+      );
+    case "AbortError":
+      return "The passkey request was cancelled.";
+    case "ConstraintError":
+      return "This authenticator cannot meet the required user verification.";
+    default:
+      return name
+        ? `Passkey request failed (${name}).`
+        : "Passkey request failed for an unknown reason.";
+  }
+}
+
+/**
+ * Whether this device has a built-in authenticator (fingerprint, face, or an OS
+ * credential store). False does not mean passkeys are unusable — a security key
+ * or a phone will still work — it means there is nothing built in.
+ */
+export async function platformAuthenticatorAvailable(): Promise<boolean> {
+  try {
+    const pkc = (globalThis as { PublicKeyCredential?: { isUserVerifyingPlatformAuthenticatorAvailable?: () => Promise<boolean> } })
+      .PublicKeyCredential;
+    if (!pkc?.isUserVerifyingPlatformAuthenticatorAvailable) return false;
+    return await pkc.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch {
+    return false;
+  }
+}

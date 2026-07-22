@@ -10,6 +10,7 @@ import {
   listChanges,
   operatorLogin,
   passkeysSupported,
+  platformAuthenticatorAvailable,
   proposeChange,
   registerOperatorPasskey,
   storedSession,
@@ -50,8 +51,14 @@ export function ControlPlanePanel() {
   // browser -- a hydration mismatch, which React recovers from by throwing away
   // the server markup.
   const [canUsePasskeys, setCanUsePasskeys] = useState(false);
+  // Whether this machine has a built-in authenticator. False does not mean
+  // passkeys are unusable — a security key or a phone still works — but it is
+  // the difference between "tap your fingerprint" and "a dialog you may not
+  // recognise", so it is worth saying before someone clicks.
+  const [hasPlatformAuthenticator, setHasPlatformAuthenticator] = useState<boolean | null>(null);
   useEffect(() => {
     setCanUsePasskeys(passkeysSupported());
+    void platformAuthenticatorAvailable().then(setHasPlatformAuthenticator);
   }, []);
 
 
@@ -99,6 +106,15 @@ export function ControlPlanePanel() {
             This browser cannot use passkeys, so it cannot sign in to the control plane.
           </p>
         ) : null}
+        {canUsePasskeys && hasPlatformAuthenticator === false ? (
+          <p className="muted" style={{ fontSize: 12 }}>
+            This device has no built-in authenticator (no fingerprint or face
+            unlock). Passkeys still work — the browser will offer a security key,
+            or a QR code to use your phone. Choose one of those when prompted;
+            dismissing the dialog is what causes “no passkey was created”.
+          </p>
+        ) : null}
+
         <label className="kicker">Operator</label>
         <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
         <div className="row" style={{ marginTop: 12, gap: 8 }}>

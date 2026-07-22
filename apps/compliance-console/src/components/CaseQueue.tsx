@@ -9,6 +9,7 @@ import {
   listCases,
   login,
   passkeysSupported,
+  platformAuthenticatorAvailable,
   registerPasskey,
   storedSession,
   type Me,
@@ -39,8 +40,14 @@ export function CaseQueue() {
   // browser -- a hydration mismatch, which React recovers from by throwing away
   // the server markup.
   const [canUsePasskeys, setCanUsePasskeys] = useState(false);
+  // Whether this machine has a built-in authenticator. False does not mean
+  // passkeys are unusable — a security key or a phone still works — but it is
+  // the difference between "tap your fingerprint" and "a dialog you may not
+  // recognise", so it is worth saying before someone clicks.
+  const [hasPlatformAuthenticator, setHasPlatformAuthenticator] = useState<boolean | null>(null);
   useEffect(() => {
     setCanUsePasskeys(passkeysSupported());
+    void platformAuthenticatorAvailable().then(setHasPlatformAuthenticator);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -78,6 +85,15 @@ export function CaseQueue() {
         {!canUsePasskeys ? (
           <p className="danger">This browser cannot use passkeys.</p>
         ) : null}
+        {canUsePasskeys && hasPlatformAuthenticator === false ? (
+          <p className="muted" style={{ fontSize: 12 }}>
+            This device has no built-in authenticator (no fingerprint or face
+            unlock). Passkeys still work — the browser will offer a security key,
+            or a QR code to use your phone. Choose one of those when prompted;
+            dismissing the dialog is what causes “no passkey was created”.
+          </p>
+        ) : null}
+
         <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
         <div className="row" style={{ gap: 8, marginTop: 12 }}>
           <button

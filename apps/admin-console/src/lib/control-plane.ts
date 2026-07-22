@@ -14,6 +14,7 @@ import {
   decodeCreationOptions,
   decodeRequestOptions,
   encodeAuthenticationCredential,
+  describePasskeyError,
   encodeRegistrationCredential,
   type RawAssertionCredential,
   type RawAttestationCredential,
@@ -96,9 +97,14 @@ export async function registerOperatorPasskey(
   const options = await begin.json();
   const challenge = options.publicKey?.challenge as string;
 
-  const created = (await navigator.credentials.create({
-    publicKey: decodeCreationOptions(options) as unknown as PublicKeyCredentialCreationOptions,
-  })) as PublicKeyCredential | null;
+  let created: PublicKeyCredential | null;
+  try {
+    created = (await navigator.credentials.create({
+      publicKey: decodeCreationOptions(options) as unknown as PublicKeyCredentialCreationOptions,
+    })) as PublicKeyCredential | null;
+  } catch (err) {
+    return { ok: false, message: describePasskeyError(err) };
+  }
   if (!created) return { ok: false, message: "No passkey was created." };
 
   const finish = await identityPost("/v1/passkeys/register/finish", {
@@ -231,3 +237,5 @@ export async function applyChange(id: string): Promise<{ ok: boolean; message: s
   if (!res.ok) return { ok: false, message: await message(res, `Apply refused (${res.status}).`) };
   return { ok: true, message: "Applied." };
 }
+
+export { platformAuthenticatorAvailable } from "@ephera/passkeys";

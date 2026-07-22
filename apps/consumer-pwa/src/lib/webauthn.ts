@@ -13,6 +13,7 @@ import {
   decodeCreationOptions,
   decodeRequestOptions,
   encodeAuthenticationCredential,
+  describePasskeyError,
   encodeRegistrationCredential,
   type AuthenticationCredentialJSON,
   type RawAssertionCredential,
@@ -55,9 +56,16 @@ export async function registerPasskey(
   const options = await beginRes.json();
   const challenge = options.publicKey?.challenge as string;
 
-  const created = (await navigator.credentials.create({
-    publicKey: decodeCreationOptions(options) as unknown as PublicKeyCredentialCreationOptions,
-  })) as PublicKeyCredential | null;
+  // The browser throws on dismissal, timeout and "nothing available to use".
+  // Left uncaught this reaches the user as a crash rather than an explanation.
+  let created: PublicKeyCredential | null;
+  try {
+    created = (await navigator.credentials.create({
+      publicKey: decodeCreationOptions(options) as unknown as PublicKeyCredentialCreationOptions,
+    })) as PublicKeyCredential | null;
+  } catch (err) {
+    return { ok: false, message: describePasskeyError(err) };
+  }
   if (!created) {
     return { ok: false, message: "No passkey was created." };
   }
@@ -112,9 +120,14 @@ export async function authoriseWithPasskey(
   }
   const { assertion, challenge } = await challengeRes.json();
 
-  const assertionResult = (await navigator.credentials.get({
-    publicKey: decodeRequestOptions(assertion) as unknown as PublicKeyCredentialRequestOptions,
-  })) as PublicKeyCredential | null;
+  let assertionResult: PublicKeyCredential | null;
+  try {
+    assertionResult = (await navigator.credentials.get({
+      publicKey: decodeRequestOptions(assertion) as unknown as PublicKeyCredentialRequestOptions,
+    })) as PublicKeyCredential | null;
+  } catch (err) {
+    return { grant: null, reason: "cancelled", message: describePasskeyError(err) };
+  }
   if (!assertionResult) {
     return { grant: null, reason: "cancelled", message: "Authorisation was cancelled." };
   }
@@ -139,3 +152,5 @@ export async function authoriseWithPasskey(
   const { grant } = await finishRes.json();
   return { grant: typeof grant === "string" ? grant : null };
 }
+
+export { platformAuthenticatorAvailable } from "@ephera/passkeys";

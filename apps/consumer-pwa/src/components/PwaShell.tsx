@@ -9,7 +9,11 @@ import {
   PAYMENTS,
   type Balance,
 } from "../lib/api";
-import { passkeysSupported, registerPasskey } from "../lib/webauthn";
+import {
+  passkeysSupported,
+  platformAuthenticatorAvailable,
+  registerPasskey,
+} from "../lib/webauthn";
 
 const DEMO_SUBJECT = "user:demo-self:GHS";
 
@@ -86,8 +90,14 @@ export function PwaShell() {
   // browser -- a hydration mismatch, which React recovers from by throwing away
   // the server markup.
   const [canUsePasskeys, setCanUsePasskeys] = useState(false);
+  // Whether this machine has a built-in authenticator. False does not mean
+  // passkeys are unusable — a security key or a phone still works — but it is
+  // the difference between "tap your fingerprint" and "a dialog you may not
+  // recognise", so it is worth saying before someone clicks.
+  const [hasPlatformAuthenticator, setHasPlatformAuthenticator] = useState<boolean | null>(null);
   useEffect(() => {
     setCanUsePasskeys(passkeysSupported());
+    void platformAuthenticatorAvailable().then(setHasPlatformAuthenticator);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -315,6 +325,13 @@ export function PwaShell() {
               </button>
             ) : null}
           </div>
+          {canUsePasskeys && hasPlatformAuthenticator === false ? (
+            <p style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.5, marginTop: 10 }}>
+              This device has no built-in authenticator. Passkeys still work — the
+              browser will offer a security key or a QR code for your phone.
+              Dismissing that dialog is what causes “no passkey was created”.
+            </p>
+          ) : null}
           <p style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.5, marginTop: 10 }}>
             {canUsePasskeys
               ? "Your passkey signs the exact transfer — recipient, amount and fee. A signature for one payment cannot authorise another."
