@@ -57,6 +57,12 @@ export type ComplianceDocument = {
 };
 
 export type ProviderApplication = {
+  /**
+   * The authenticated subject that owns this application. Reads and writes are
+   * scoped to it: before this existed, every endpoint returned every
+   * provider's record to any caller (D-08).
+   */
+  ownerSubject?: string;
   id: string;
   legalName: string;
   tradingName: string;

@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
+import { sessionFromRequest, unauthorised } from "@/lib/session";
 import { initiatePayment, verifyAccountName } from "@ephera/connect-layer";
 import { providerStore } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  // Gated at G4: this returned every provider's bank connections to any caller (D-08).
+  const auth = sessionFromRequest(req);
+  if (!auth.ok) return unauthorised(auth.reason);
+
   const { searchParams } = new URL(req.url);
   const country = searchParams.get("country") || undefined;
   return NextResponse.json({
@@ -14,6 +19,10 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  // Gated at G4: this returned every provider's bank connections to any caller (D-08).
+  const auth = sessionFromRequest(req);
+  if (!auth.ok) return unauthorised(auth.reason);
+
   const body = (await req.json()) as {
     action: "link_token" | "exchange" | "verify_name" | "payment";
     applicationId?: string;

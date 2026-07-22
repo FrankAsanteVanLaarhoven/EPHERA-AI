@@ -21,8 +21,8 @@ function uid(prefix: string) {
 const applications: ProviderApplication[] = [
   {
     id: "app_seed_mtn",
-    legalName: "MTN Mobile Money Ghana Ltd (sandbox demo)",
-    tradingName: "MTN MoMo GH",
+    legalName: "Sandbox Mobile Money Ltd (fictional)",
+    tradingName: "Sandbox MoMo GH",
     category: "mobile_money",
     countries: ["GH"],
     primaryCountry: "GH",
@@ -34,7 +34,7 @@ const applications: ProviderApplication[] = [
     contactPhone: "+233200000000",
     servicesOffered: ["cash_in", "cash_out", "p2p", "merchant"],
     description: "Seed provider for Super Admin monitoring demos.",
-    status: "approved",
+    status: "draft",
     createdAt: new Date(Date.now() - 86400000 * 10).toISOString(),
     updatedAt: new Date(Date.now() - 86400000 * 2).toISOString(),
     documents: [
@@ -88,6 +88,17 @@ export const providerStore = {
   connections,
   swiftMessages,
   credentials,
+
+  /** Applications owned by a subject. Used for every provider-facing read. */
+  listForOwner(subject: string) {
+    return applications.filter((a) => a.ownerSubject === subject);
+  },
+
+  /** Ownership check for a single record. */
+  ownedBy(id: string, subject: string) {
+    const app = applications.find((a) => a.id === id);
+    return app?.ownerSubject === subject ? app : null;
+  },
 
   list() {
     return applications;

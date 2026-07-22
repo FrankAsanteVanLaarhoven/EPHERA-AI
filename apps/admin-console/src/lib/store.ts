@@ -132,8 +132,8 @@ const featureFlags: FeatureFlag[] = [
     lastChangedAt: iso(45),
   },
   {
-    id: "feat_ai_ops_copilot",
-    name: "Ops AI copilot",
+    id: "feat_ai_ops_assistant",
+    name: "Ops AI assistant",
     description: "Super-admin decision support over workflows & risk",
     category: "ai",
     enabled: true,
@@ -283,7 +283,7 @@ const regions: RegionVolume[] = [
 const providers: Provider[] = [
   {
     id: "prov_mtn_gh",
-    name: "MTN Mobile Money GH",
+    name: "Sandbox Mobile Money GH",
     type: "mobile_money",
     status: "sandbox",
     region: "GH",
@@ -523,9 +523,9 @@ const transactions: TransactionRow[] = [
     amountMinor: 10_00,
     currency: "GHS",
     from: "Ama Mensah",
-    to: "MTN Self",
+    to: "Sandbox Self",
     region: "Greater Accra",
-    provider: "MTN Mobile Money GH",
+    provider: "Sandbox Mobile Money GH",
     createdAt: iso(130),
   },
 ];
@@ -689,8 +689,8 @@ const aiModels: AiModel[] = [
   },
   {
     id: "ai_ops",
-    name: "Ops decision copilot",
-    role: "ops_copilot",
+    name: "Ops decision assistant",
+    role: "ops_assistant",
     provider: "EPHERA Super Admin",
     version: "0.1.0",
     status: "active",

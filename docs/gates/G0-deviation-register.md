@@ -45,7 +45,9 @@ Addressed at G4 — see [`G4-report.md`](G4-report.md).
 | ID | Sev | State |
 | --- | --- | --- |
 | D-10 | S1 | **Closed.** The fake cryptography is replaced with Web Crypto: CSPRNG secrets, HMAC-SHA-256 fingerprints under a server-held pepper, HMAC-SHA-256 webhook signatures over a length-prefixed message, constant-time comparison, and a real nonce store for replay protection. Sandbox credentials are no longer labelled `live`. Controls that cannot be implemented here — mutual TLS, key management, envelope encryption — are absent rather than represented by a boolean. 14 tests |
-| D-09 | S1 | **Partly closed.** The two mechanisms are gone: the unrestricted patch merge now rejects any field an applicant does not own (so `status` cannot be self-set), and approval no longer mints a credential or returns a raw secret in the response body. **Still open**: the portal has no authentication, so approval is not yet gated on an authenticated operator |
+| D-09 | S1 | **Closed as an exposure.** The unrestricted patch merge rejects any field an applicant does not own; the unauthenticated admin route is deleted; approval mints no credential and returns no secret. Nothing can approve a provider at all until the registry moves to its owning service and `provider.approve` is wired to the control plane — approval is impossible rather than unauthenticated |
+| D-08 | S1 | **Closed.** Every provider-facing route requires a verified session and reads are scoped to the owning subject. Not-found and not-yours return the same answer, so ids cannot be enumerated. `catalog` (static reference data) and `health` remain open by design |
+| D-30 | S3 | **Closed.** The seed record no longer names a real licensed operator and no longer ships pre-approved. The console's seed data is de-identified too |
 
 Addressed at G2-C — see [`G2C-report.md`](G2C-report.md). The control plane
 exists and is tested; **the console has not been migrated onto it**, so the

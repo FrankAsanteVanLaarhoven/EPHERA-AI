@@ -1,21 +1,37 @@
 import { NextResponse } from "next/server";
 import { providerStore } from "@/lib/store";
+import { forbidden, sessionFromRequest, unauthorised } from "@/lib/session";
 import type { ProviderApplication } from "@ephera/connect-layer";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Reads are scoped to the authenticated provider.
+ *
+ * This endpoint used to return every application -- legal names, registration
+ * numbers, tax IDs, contact details and compliance documents -- to any caller,
+ * and `?id=` fetched any record by guessable id (D-08).
+ */
 export async function GET(req: Request) {
+  const auth = sessionFromRequest(req);
+  if (!auth.ok) return unauthorised(auth.reason);
+
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
   if (id) {
-    const app = providerStore.get(id);
+    const app = providerStore.ownedBy(id, auth.session.sub);
+    // Not-found and not-yours are the same answer, so the endpoint cannot be
+    // used to discover which application ids exist.
     if (!app) return NextResponse.json({ error: "not_found" }, { status: 404 });
     return NextResponse.json(app);
   }
-  return NextResponse.json({ items: providerStore.list() });
+  return NextResponse.json({ items: providerStore.listForOwner(auth.session.sub) });
 }
 
 export async function POST(req: Request) {
+  const auth = sessionFromRequest(req);
+  if (!auth.ok) return unauthorised(auth.reason);
+
   const body = (await req.json()) as Partial<ProviderApplication> & {
     legalName: string;
     tradingName: string;
@@ -55,6 +71,9 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+  const auth = sessionFromRequest(req);
+  if (!auth.ok) return unauthorised(auth.reason);
+
   const body = (await req.json()) as {
     id: string;
     action?: "submit" | "accept_terms" | "update";
@@ -63,6 +82,11 @@ export async function PATCH(req: Request) {
     patch?: Partial<ProviderApplication>;
   };
   if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  if (!providerStore.ownedBy(body.id, auth.session.sub)) {
+    // A provider could previously patch any application by id, including
+    // another provider's (D-09).
+    return forbidden("This application belongs to a different provider.");
+  }
 
   if (body.action === "submit") {
     const app = providerStore.submit(body.id);

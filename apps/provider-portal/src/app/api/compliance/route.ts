@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
+import { sessionFromRequest, unauthorised } from "@/lib/session";
 import { providerStore } from "@/lib/store";
 import type { ComplianceDocType, CountryCode } from "@ephera/connect-layer";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  // Gated at G4: this returned document records for any application to any caller (D-08).
+  const auth = sessionFromRequest(req);
+  if (!auth.ok) return unauthorised(auth.reason);
+
   const body = (await req.json()) as {
     applicationId: string;
     type: ComplianceDocType;
