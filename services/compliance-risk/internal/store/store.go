@@ -75,51 +75,14 @@ func (s *Store) Tier(ctx context.Context, name string) (risk.Tier, error) {
 	return t, err
 }
 
-// SetTier records a verification decision.
-//
-// The subject can never be the decider — enforced here and, independently, by a
-// database constraint. A customer used to be able to promote themselves simply
-// by writing to their own device (D-33).
-func (s *Store) SetTier(ctx context.Context, subject, toTier, decidedBy, evidenceRef, reason string) (Customer, error) {
-	if subject == decidedBy {
-		return Customer{}, ErrSelfVerification
-	}
-	if evidenceRef == "" || reason == "" {
-		return Customer{}, errors.New("a tier decision requires an evidence reference and a reason")
-	}
-	if _, err := s.Tier(ctx, toTier); err != nil {
-		return Customer{}, err
-	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return Customer{}, err
-	}
-	defer tx.Rollback(ctx)
-
-	var from string
-	err = tx.QueryRow(ctx, `SELECT tier FROM customers WHERE subject = $1 FOR UPDATE`, subject).Scan(&from)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Customer{}, ErrNotFound
-	}
-	if err != nil {
-		return Customer{}, err
-	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE customers SET tier = $2, updated_at = now() WHERE subject = $1`, subject, toTier); err != nil {
-		return Customer{}, err
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO tier_decisions (subject, from_tier, to_tier, decided_by, evidence_ref, reason)
-		VALUES ($1,$2,$3,$4,$5,$6)
-	`, subject, from, toTier, decidedBy, evidenceRef, reason); err != nil {
-		return Customer{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return Customer{}, err
-	}
-	return s.EnsureCustomer(ctx, subject)
-}
+// The legacy SetTier was removed here. It wrote a tier decision on any
+// free-string evidence reference, with no check that the evidence had been
+// verified — the exact pre-G3-B defect where a verification could be recorded
+// against evidence nobody had seen. It was unreachable (the handler uses
+// SetTierWithEvidence), but leaving it in the store meant a future wiring could
+// silently reopen self-serviceable tiers on fabricated evidence. Tier changes
+// go through SetTierWithEvidence, which requires the evidence to exist and be
+// verified first.
 
 // Screen matches a name against the screening list.
 func (s *Store) Screen(ctx context.Context, name string) ([]risk.ScreeningHit, error) {

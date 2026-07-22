@@ -794,3 +794,38 @@ func TestCaptureRejectsAHoldFromAnotherAccount(t *testing.T) {
 		t.Fatalf("victim balance changed: %d", got)
 	}
 }
+
+// L1: an idempotency key is a retry key for one transfer, not a global alias.
+// Reusing it for a different transfer must be refused, not silently answered
+// with the first transfer's journal entry.
+func TestIdempotencyKeyReusedForADifferentTransferIsRefused(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	from := openWallet(t, st, "GHS", 200_000)
+	to := openWallet(t, st, "GHS", 0)
+	key := "idem_" + uuid.NewString()
+
+	first := authorised(t, TransferRequest{
+		FromExternalRef: from, ToExternalRef: to, AmountMinor: 10_000, Currency: "GHS",
+		TransferID: "tx_" + uuid.NewString(), IdempotencyKey: key,
+	})
+	je1, err := st.CaptureTransfer(ctx, first)
+	if err != nil {
+		t.Fatalf("first transfer: %v", err)
+	}
+
+	// Same key, retry of the SAME transfer -> returns the same entry.
+	if je, err := st.CaptureTransfer(ctx, first); err != nil || je != je1 {
+		t.Fatalf("a genuine retry did not return the same entry: je=%q err=%v", je, err)
+	}
+
+	// Same key, DIFFERENT transfer -> refused.
+	second := authorised(t, TransferRequest{
+		FromExternalRef: from, ToExternalRef: to, AmountMinor: 20_000, Currency: "GHS",
+		TransferID: "tx_" + uuid.NewString(), IdempotencyKey: key,
+	})
+	if _, err := st.CaptureTransfer(ctx, second); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("a reused idempotency key for a different transfer was accepted: %v", err)
+	}
+}

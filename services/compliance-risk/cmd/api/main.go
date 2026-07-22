@@ -112,7 +112,6 @@ func (s *server) getCustomer(w http.ResponseWriter, r *http.Request) {
 type tierRequest struct {
 	Tier        string `json:"tier"`
 	DecidedBy   string `json:"decidedBy"`
-	EvidenceRef string `json:"evidenceRef"`
 	Reason      string `json:"reason"`
 }
 

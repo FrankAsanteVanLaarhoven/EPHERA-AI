@@ -264,9 +264,20 @@ func (s *Store) CaptureTransfer(ctx context.Context, req TransferRequest) (strin
 	}
 	defer tx.Rollback(ctx)
 
-	var existingJE string
-	err = tx.QueryRow(ctx, `SELECT id::text FROM journal_entries WHERE idempotency_key=$1`, req.IdempotencyKey).Scan(&existingJE)
+	var existingJE, existingTransfer string
+	err = tx.QueryRow(ctx,
+		`SELECT id::text, transfer_id FROM journal_entries WHERE idempotency_key=$1`,
+		req.IdempotencyKey).Scan(&existingJE, &existingTransfer)
 	if err == nil {
+		// A matching idempotency key is a retry only if it is the SAME transfer.
+		// Returning the stored entry for a DIFFERENT transfer would silently drop
+		// the new one and hand the caller another transfer's journal entry (and,
+		// via the receipt lookup, another transfer's receipt). A reused key for a
+		// different transfer is a caller error, not a retry, and is refused.
+		if existingTransfer != req.TransferID {
+			return "", fmt.Errorf("%w: idempotency key already used for a different transfer",
+				ErrInvalidRequest)
+		}
 		return existingJE, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
