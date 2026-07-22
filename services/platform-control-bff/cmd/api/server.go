@@ -31,6 +31,7 @@ import (
 
 	"github.com/ephera/authgrant/session"
 	"github.com/ephera/platform-control-bff/internal/authz"
+	"github.com/ephera/platform-control-bff/internal/compliance"
 	"github.com/ephera/platform-control-bff/internal/effect"
 	"github.com/ephera/platform-control-bff/internal/store"
 )
@@ -38,10 +39,24 @@ import (
 type server struct {
 	store          *store.Store
 	applier        effect.Applier
+	compliance     complianceClient
 	sessionPK      []byte // ed25519 public key of identity-access
 	allowedOrigins []string
 	now            func() time.Time
 }
+
+// complianceClient is an interface so tests can drive the console surface
+// without a compliance service running.
+type complianceClient interface {
+	ListCases(ctx context.Context) (map[string]any, int, error)
+	CloseCase(ctx context.Context, id, status, closedBy, note string) (map[string]any, int, error)
+	Subject(ctx context.Context, subject string) (map[string]any, int, error)
+	Requirements(ctx context.Context, subject, tier string) (map[string]any, int, error)
+	ReviewDocument(ctx context.Context, id, status, reviewedBy, note string) (map[string]any, int, error)
+	SetTier(ctx context.Context, subject, tier, decidedBy, reason string) (map[string]any, int, error)
+}
+
+var _ complianceClient = (*compliance.Client)(nil)
 
 type principal struct {
 	Session session.Payload
@@ -156,6 +171,14 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/audit/verify", s.verifyAudit)
 	mux.HandleFunc("GET /v1/changes", s.listChanges)
 	mux.HandleFunc("GET /v1/audit", s.listAudit)
+
+	// Compliance work.
+	mux.HandleFunc("GET /v1/compliance/cases", s.listCases)
+	mux.HandleFunc("POST /v1/compliance/cases/{id}/decision", s.decideCase)
+	mux.HandleFunc("GET /v1/compliance/subjects/{subject}", s.complianceSubject)
+	mux.HandleFunc("GET /v1/compliance/subjects/{subject}/requirements", s.complianceRequirements)
+	mux.HandleFunc("POST /v1/compliance/subjects/{subject}/tier", s.setTier)
+	mux.HandleFunc("POST /v1/compliance/documents/{id}/review", s.reviewDocument)
 	return withCORS(mux, s.allowedOrigins)
 }
 

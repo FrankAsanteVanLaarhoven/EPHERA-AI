@@ -71,12 +71,12 @@ jobs:
           done
       - name: Type-check applications
         run: |
-          for a in merchant-web consumer-pwa admin-console provider-portal; do
+          for a in merchant-web consumer-pwa admin-console provider-portal compliance-console; do
             npm run typecheck -w "@ephera/$a"
           done
       - name: Build applications
         run: |
-          for a in merchant-web consumer-pwa admin-console provider-portal; do
+          for a in merchant-web consumer-pwa admin-console provider-portal compliance-console; do
             npm run build -w "@ephera/$a"
           done
 

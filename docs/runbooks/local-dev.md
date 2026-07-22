@@ -22,6 +22,7 @@
 | Consumer PWA (dev) | 3006 |
 | Super Admin console (dev) | **3007** |
 | Provider Portal (dev) | **3008** |
+| Compliance console (dev) | **3009** |
 
 ## Start infrastructure
 
@@ -197,3 +198,19 @@ constraint.
 The screening list is a **sandbox fixture with fictional entries**, and matching
 is case-folded exact comparison. A real deployment consumes a licensed list with
 fuzzy matching; nothing here should be mistaken for one.
+
+## Compliance console
+
+`apps/compliance-console` (:3009) is where analysts work held payments.
+
+It holds **no service credential**. An analyst signs in with a passkey, and the
+control plane checks their role before calling compliance-risk with a token the
+browser never sees — the opposite of the provider portal, which returned a
+payments-write secret in an HTTP response.
+
+Viewing a case and deciding it are separate permissions: a support agent can see
+that a payment is held without being able to clear it. Deciding a customer's
+verification tier is separate again, and an analyst does not hold it.
+
+Clearing or blocking requires a note. The note is the record an examiner reads,
+so a decision without a reason is refused.

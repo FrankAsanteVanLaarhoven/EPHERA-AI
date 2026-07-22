@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ephera/platform-control-bff/internal/compliance"
 	"github.com/ephera/platform-control-bff/internal/effect"
 	"github.com/ephera/platform-control-bff/internal/store"
 )
@@ -43,6 +44,7 @@ func main() {
 		sessionPK:      pk,
 		allowedOrigins: origins,
 		applier:        effect.NewHTTPApplier(env("LEDGER_URL", "http://localhost:8092")),
+		compliance:     compliance.New(env("COMPLIANCE_URL", "http://localhost:8095")),
 	}
 	log.Printf("EPHERA platform-control-bff on %s", addr)
 	if err := http.ListenAndServe(addr, s.routes()); err != nil {

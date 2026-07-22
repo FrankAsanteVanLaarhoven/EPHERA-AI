@@ -27,6 +27,14 @@ const (
 	PermMandateChange    Permission = "mandate.change"
 	PermApproveChange    Permission = "change.approve"
 	PermViewAudit        Permission = "audit.view"
+
+	// Compliance work. Viewing a case and deciding it are separate: a support
+	// agent may need to see that a payment is held without being able to clear
+	// it.
+	PermViewCases        Permission = "cases.view"
+	PermDecideCases      Permission = "cases.decide"
+	PermReviewDocuments  Permission = "kyc.review"
+	PermDecideTier       Permission = "kyc.decide"
 )
 
 // rolePermissions is the whole model. It is intentionally small: a permission
@@ -37,6 +45,8 @@ var rolePermissions = map[string][]Permission{
 	},
 	"support_agent": {
 		PermViewOperations, PermViewCustomers, PermViewAudit,
+		// Sees that a payment is held, cannot decide it.
+		PermViewCases,
 	},
 	"ops_manager": {
 		PermViewOperations, PermViewCustomers, PermViewAudit,
@@ -46,6 +56,14 @@ var rolePermissions = map[string][]Permission{
 	"compliance_officer": {
 		PermViewOperations, PermViewCustomers, PermViewAudit,
 		PermFreezeWallet, PermUnfreezeWallet,
+		PermViewCases, PermDecideCases, PermReviewDocuments, PermDecideTier,
+	},
+	// An analyst works cases and reviews evidence but cannot change a
+	// customer's verification tier: deciding standing is a separate
+	// responsibility from investigating a payment.
+	"risk_analyst": {
+		PermViewOperations, PermViewCustomers, PermViewAudit,
+		PermViewCases, PermDecideCases, PermReviewDocuments,
 	},
 	// `approver` is a separate role rather than a level, so that the ability to
 	// approve someone else's change is granted deliberately and can be held by

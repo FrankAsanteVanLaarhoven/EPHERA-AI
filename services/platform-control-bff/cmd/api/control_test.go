@@ -504,3 +504,171 @@ func TestActionWithNoOwningServiceIsRefused(t *testing.T) {
 		t.Fatal("an action with no owning service was recorded as applied")
 	}
 }
+
+// --- compliance console surface ---
+
+// fakeCompliance stands in for compliance-risk, recording who the control plane
+// says is deciding.
+type fakeCompliance struct {
+	closedBy   string
+	reviewedBy string
+	decidedBy  string
+	calls      int
+}
+
+func (f *fakeCompliance) ListCases(context.Context) (map[string]any, int, error) {
+	f.calls++
+	return map[string]any{"items": []any{}}, 200, nil
+}
+func (f *fakeCompliance) CloseCase(_ context.Context, _, _, closedBy, _ string) (map[string]any, int, error) {
+	f.closedBy = closedBy
+	return map[string]any{"status": "cleared"}, 200, nil
+}
+func (f *fakeCompliance) Subject(context.Context, string) (map[string]any, int, error) {
+	return map[string]any{"tier": "verified"}, 200, nil
+}
+func (f *fakeCompliance) Requirements(context.Context, string, string) (map[string]any, int, error) {
+	return map[string]any{"missingEvidence": []any{}}, 200, nil
+}
+func (f *fakeCompliance) ReviewDocument(_ context.Context, _, _, reviewedBy, _ string) (map[string]any, int, error) {
+	f.reviewedBy = reviewedBy
+	return map[string]any{"status": "verified"}, 200, nil
+}
+func (f *fakeCompliance) SetTier(_ context.Context, _, _, decidedBy, _ string) (map[string]any, int, error) {
+	f.decidedBy = decidedBy
+	return map[string]any{"tier": "verified"}, 200, nil
+}
+
+func complianceHarness(t *testing.T) (*harness, *fakeCompliance) {
+	t.Helper()
+	h := newHarness(t)
+	fc := &fakeCompliance{}
+	// Rebuild the server with the fake attached.
+	s := &server{store: h.st, sessionPK: h.priv.Public().(ed25519.PublicKey), applier: h.applier, compliance: fc}
+	srv := httptest.NewServer(s.routes())
+	t.Cleanup(srv.Close)
+	h.srv = srv
+	return h, fc
+}
+
+func TestComplianceRoutesRequireAuthentication(t *testing.T) {
+	h, _ := complianceHarness(t)
+	for _, tc := range []struct{ method, path string }{
+		{"GET", "/v1/compliance/cases"},
+		{"POST", "/v1/compliance/cases/abc/decision"},
+		{"POST", "/v1/compliance/subjects/s/tier"},
+	} {
+		if code, _ := h.do(t, tc.method, tc.path, "", map[string]any{}); code != http.StatusUnauthorized {
+			t.Fatalf("%s %s returned %d, expected 401", tc.method, tc.path, code)
+		}
+	}
+}
+
+// A support agent may see that a payment is held without being able to decide
+// it. Viewing and deciding are separate permissions on purpose.
+func TestSupportAgentCanViewCasesButNotDecideThem(t *testing.T) {
+	h, _ := complianceHarness(t)
+	tok := h.token(t, support, nil)
+
+	if code, _ := h.do(t, "GET", "/v1/compliance/cases", tok, nil); code != http.StatusOK {
+		t.Fatalf("support agent could not view cases: %d", code)
+	}
+	code, _ := h.do(t, "POST", "/v1/compliance/cases/abc/decision", tok,
+		map[string]any{"status": "cleared", "note": "looks fine"})
+	if code != http.StatusForbidden {
+		t.Fatalf("support agent decided a case: %d", code)
+	}
+}
+
+// The deciding analyst comes from the session, so the console cannot claim to
+// be someone else — which is what lets compliance-risk enforce its own rule
+// that nobody decides their own case.
+func TestDecidingAnalystComesFromTheSession(t *testing.T) {
+	h, fc := complianceHarness(t)
+	ctx := context.Background()
+	if _, err := h.st.Pool().Exec(ctx,
+		`INSERT INTO operators (subject, display_name) VALUES ('analyst@ephera.internal','Analyst')
+		 ON CONFLICT (subject) DO NOTHING`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := h.st.Pool().Exec(ctx,
+		`INSERT INTO operator_roles (subject, role) VALUES ('analyst@ephera.internal','risk_analyst')
+		 ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatalf("seed roles: %v", err)
+	}
+
+	tok := h.token(t, "analyst@ephera.internal", nil)
+	code, _ := h.do(t, "POST", "/v1/compliance/cases/abc/decision", tok,
+		map[string]any{"status": "cleared", "note": "verified with the customer", "closedBy": "someone.else@ephera.internal"})
+	if code != http.StatusOK {
+		t.Fatalf("analyst could not decide: %d", code)
+	}
+	if fc.closedBy != "analyst@ephera.internal" {
+		t.Fatalf("decider was %q; the request body was trusted", fc.closedBy)
+	}
+}
+
+// A case decision without a note cannot be reviewed later.
+func TestCaseDecisionRequiresANote(t *testing.T) {
+	h, _ := complianceHarness(t)
+	ctx := context.Background()
+	_, _ = h.st.Pool().Exec(ctx,
+		`INSERT INTO operators (subject, display_name) VALUES ('officer@ephera.internal','Officer')
+		 ON CONFLICT (subject) DO NOTHING`)
+	_, _ = h.st.Pool().Exec(ctx,
+		`INSERT INTO operator_roles (subject, role) VALUES ('officer@ephera.internal','compliance_officer')
+		 ON CONFLICT DO NOTHING`)
+
+	tok := h.token(t, "officer@ephera.internal", nil)
+	code, _ := h.do(t, "POST", "/v1/compliance/cases/abc/decision", tok,
+		map[string]any{"status": "cleared"})
+	if code != http.StatusBadRequest {
+		t.Fatalf("a case was decided with no note: %d", code)
+	}
+}
+
+// Deciding a customer's standing is a separate responsibility from
+// investigating a payment: an analyst works cases but does not set tiers.
+func TestAnalystCannotSetATier(t *testing.T) {
+	h, _ := complianceHarness(t)
+	ctx := context.Background()
+	_, _ = h.st.Pool().Exec(ctx,
+		`INSERT INTO operators (subject, display_name) VALUES ('analyst2@ephera.internal','Analyst')
+		 ON CONFLICT (subject) DO NOTHING`)
+	_, _ = h.st.Pool().Exec(ctx,
+		`INSERT INTO operator_roles (subject, role) VALUES ('analyst2@ephera.internal','risk_analyst')
+		 ON CONFLICT DO NOTHING`)
+
+	tok := h.token(t, "analyst2@ephera.internal", nil)
+	code, _ := h.do(t, "POST", "/v1/compliance/subjects/user:x:GHS/tier", tok,
+		map[string]any{"tier": "verified", "reason": "looks fine to me"})
+	if code != http.StatusForbidden {
+		t.Fatalf("an analyst set a verification tier: %d", code)
+	}
+}
+
+// Compliance work is audited like everything else, with the operator's identity.
+func TestComplianceDecisionsAreAudited(t *testing.T) {
+	h, _ := complianceHarness(t)
+	ctx := context.Background()
+	_, _ = h.st.Pool().Exec(ctx,
+		`INSERT INTO operators (subject, display_name) VALUES ('officer2@ephera.internal','Officer')
+		 ON CONFLICT (subject) DO NOTHING`)
+	_, _ = h.st.Pool().Exec(ctx,
+		`INSERT INTO operator_roles (subject, role) VALUES ('officer2@ephera.internal','compliance_officer')
+		 ON CONFLICT DO NOTHING`)
+
+	tok := h.token(t, "officer2@ephera.internal", nil)
+	h.do(t, "POST", "/v1/compliance/cases/case-xyz/decision", tok,
+		map[string]any{"status": "blocked", "note": "confirmed fraud"})
+
+	var actor, action string
+	if err := h.st.Pool().QueryRow(ctx,
+		`SELECT actor, action FROM audit_log WHERE target = 'case-xyz' ORDER BY seq DESC LIMIT 1`).
+		Scan(&actor, &action); err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	if actor != "officer2@ephera.internal" || action != "cases.decide" {
+		t.Fatalf("audit recorded %q %q", actor, action)
+	}
+}

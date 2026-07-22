@@ -4,8 +4,8 @@
 review cases — owned by a service instead of a device.
 **Exit condition (programme):** end-to-end compliance sandbox.
 **Verdict:** PASS WITH LIMITATIONS — verification, limits, screening, KYB, KYA,
-evidence and behavioural monitoring are in place. There is no analyst console
-and no document storage. See section 9.
+evidence, behavioural monitoring and an analyst console are in place. Document
+bytes are not stored. See section 9.
 
 ## 1. Evidence and assumptions
 
@@ -98,8 +98,14 @@ route's real method.
   group holiday, and denying on a pattern punishes that case. Every alert
   carries the observation that produced it, because "structuring" alone is an
   accusation an analyst cannot check and a customer cannot answer.
-- **Cases have no console.** They are raised and closable over the API; no
-  compliance console exists to work them.
+- **The analyst console holds no service credential.** It authenticates its
+  analyst with a passkey and the control plane calls compliance-risk with a
+  token the browser never sees. Viewing a case, deciding it, and deciding a
+  customer's tier are three separate permissions, so a support agent can see a
+  held payment without clearing it and an analyst can work cases without
+  changing anyone's standing.
+- The console shows the queue and decides cases. Document review and tier
+  changes exist on the control-plane surface but have no interface yet.
 - The ledger does not consult compliance. The orchestrator does, at prepare, so
   a direct authenticated service call to the ledger would bypass limits. Closing
   that means the ledger consulting compliance itself, as it does for grants.
@@ -144,6 +150,14 @@ each individually allowed, each within the customer's limits — are held on the
 third with `possible_structuring: 3 payments between 850000 and 1000000 within
 24h`, and the case an analyst opens carries that same observation.
 
-It is still not an end-to-end compliance sandbox. There is no console for
-analysts to work cases, and document bytes are not stored. Those are the rest of
-G3 and G7.
+An analyst console followed. A held payment now reaches a queue that leads with
+the observation that caused it, and clearing or blocking requires a note --
+because the note is the record an examiner reads. Verified in a browser with a
+passkey: the analyst signs in, the queue shows
+`possible_structuring: 3 payments between 850000 and 1000000 within 24h`, Clear
+stays disabled until a note is written, and the cleared case carries both the
+analyst's identity and their words.
+
+What remains for a full end-to-end sandbox: document bytes are not stored (G7),
+and the console has no interface for document review or tier decisions even
+though the control plane supports both.
