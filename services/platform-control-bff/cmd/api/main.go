@@ -43,8 +43,9 @@ func main() {
 		store:          st,
 		sessionPK:      pk,
 		allowedOrigins: origins,
-		applier:        effect.NewHTTPApplier(env("LEDGER_URL", "http://localhost:8092")),
+		applier:        effect.NewHTTPApplier(env("LEDGER_URL", "http://localhost:8092"), st),
 		compliance:     compliance.New(env("COMPLIANCE_URL", "http://localhost:8095")),
+		serviceToken:   os.Getenv("CONTROL_SERVICE_TOKEN"),
 	}
 	log.Printf("EPHERA platform-control-bff on %s", addr)
 	if err := http.ListenAndServe(addr, s.routes()); err != nil {

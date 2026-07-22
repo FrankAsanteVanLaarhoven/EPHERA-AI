@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ephera/payments/internal/compliance"
+	"github.com/ephera/payments/internal/flags"
 	"github.com/ephera/payments/internal/ledgerclient"
 	"github.com/ephera/payments/internal/workflow"
 	"github.com/google/uuid"
@@ -20,6 +21,7 @@ type server struct {
 	tc         client.Client
 	ledger     *ledgerclient.Client
 	compliance *compliance.Client
+	flags      *flags.Client
 }
 
 type quoteRequest struct {
@@ -57,7 +59,12 @@ func main() {
 		tc:         tc,
 		ledger:     ledgerclient.New(ledgerURL),
 		compliance: compliance.New(env("COMPLIANCE_URL", "http://localhost:8095")),
+		flags:      flags.New(env("CONTROL_URL", "http://localhost:8094")),
 	}
+	// The orchestrator must know whether sends are stopped even when no human
+	// is logged in — which is exactly the situation a kill switch exists for.
+	s.flags.StartRefreshing(context.Background(), 10*time.Second)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /v1/quotes", s.quote)
@@ -189,6 +196,17 @@ func (s *server) quote(w http.ResponseWriter, r *http.Request) {
 // transaction that gets authorised is the transaction that gets posted. Nothing
 // is reserved or moved here.
 func (s *server) prepareTransfer(w http.ResponseWriter, r *http.Request) {
+	// The kill switch is checked before anything else: if sends are stopped,
+	// nothing else about this payment matters yet.
+	if d := s.flags.SendsAllowed(time.Now()); !d.Allowed {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error":   "sends_stopped",
+			"message": "Payments are not being accepted right now. " + d.Reason,
+			"stale":   d.Stale,
+		})
+		return
+	}
+
 	var req transferRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -313,6 +331,19 @@ func applyDefaults(req *transferRequest) {
 }
 
 func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
+	// Checked again at submit, not only at prepare: the switch may have been
+	// pressed in between, and that gap is exactly when it matters most.
+	// The kill switch is checked before anything else: if sends are stopped,
+	// nothing else about this payment matters yet.
+	if d := s.flags.SendsAllowed(time.Now()); !d.Allowed {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error":   "sends_stopped",
+			"message": "Payments are not being accepted right now. " + d.Reason,
+			"stale":   d.Stale,
+		})
+		return
+	}
+
 	var req transferRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

@@ -79,6 +79,7 @@ var requiresSecondOperator = map[string]bool{
 	"wallet.freeze":    true,
 	"wallet.unfreeze":  true,
 	"kill_switch":      true,
+	"resume_payments":  true,
 	"features.edit":    true,
 	"provider.approve": true,
 	"mandate.change":   true,
@@ -131,6 +132,9 @@ var PermissionForAction = map[string]Permission{
 	"wallet.freeze":    PermFreezeWallet,
 	"wallet.unfreeze":  PermUnfreezeWallet,
 	"kill_switch":      PermKillSwitch,
+	// Resuming is as sensitive as stopping. An operator who trips a control and
+	// can immediately untrip it alone has not been constrained by it.
+	"resume_payments":  PermKillSwitch,
 	"features.edit":    PermFeatureEdit,
 	"provider.approve": PermProviderApprove,
 	"mandate.change":   PermMandateChange,

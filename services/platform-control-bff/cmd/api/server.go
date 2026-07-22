@@ -24,6 +24,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strings"
@@ -42,6 +43,7 @@ type server struct {
 	compliance     complianceClient
 	sessionPK      []byte // ed25519 public key of identity-access
 	allowedOrigins []string
+	serviceToken   string
 	now            func() time.Time
 }
 
@@ -172,6 +174,9 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/changes", s.listChanges)
 	mux.HandleFunc("GET /v1/audit", s.listAudit)
 
+	// Flags, read by platform services rather than operators.
+	mux.HandleFunc("GET /v1/flags", s.serviceFlags)
+
 	// Compliance work.
 	mux.HandleFunc("GET /v1/compliance/cases", s.listCases)
 	mux.HandleFunc("POST /v1/compliance/cases/{id}/decision", s.decideCase)
@@ -180,6 +185,31 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/compliance/subjects/{subject}/tier", s.setTier)
 	mux.HandleFunc("POST /v1/compliance/documents/{id}/review", s.reviewDocument)
 	return withCORS(mux, s.allowedOrigins)
+}
+
+// serviceFlags is read by platform services, not by a console, so it
+// authenticates with a service token rather than an operator session.
+//
+// It is deliberately readable without an operator: the payment orchestrator has
+// to know whether sends are stopped even when no human is logged in, which is
+// precisely the situation a kill switch exists for.
+func (s *server) serviceFlags(w http.ResponseWriter, r *http.Request) {
+	presented := strings.TrimSpace(r.Header.Get("X-Ephera-Service-Token"))
+	if s.serviceToken == "" || presented == "" ||
+		subtle.ConstantTimeCompare([]byte(presented), []byte(s.serviceToken)) != 1 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "caller_not_authenticated"})
+		return
+	}
+	flags, err := s.store.Flags(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	out := map[string]bool{}
+	for _, f := range flags {
+		out[f.Key] = f.Enabled
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"flags": out})
 }
 
 // listChanges returns the change queue an approver works from.
@@ -376,6 +406,7 @@ func (s *server) applyChange(w http.ResponseWriter, r *http.Request) {
 		Target:          cr.Target,
 		ChangeRequestID: id,
 		Reason:          cr.Reason,
+		Payload:         cr.Payload,
 		OperatorSession: token,
 	}); err != nil {
 		s.audit(r.Context(), pr, cr.Action, cr.Target, "failed",

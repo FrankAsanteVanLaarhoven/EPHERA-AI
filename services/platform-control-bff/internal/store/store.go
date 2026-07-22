@@ -381,3 +381,68 @@ func (s *Store) ListAudit(ctx context.Context, limit int) ([]AuditRow, error) {
 	}
 	return out, rows.Err()
 }
+
+// --- platform flags ---
+
+type Flag struct {
+	Key         string    `json:"key"`
+	Enabled     bool      `json:"enabled"`
+	Description string    `json:"description"`
+	UpdatedBy   string    `json:"updatedBy"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+func (s *Store) Flags(ctx context.Context) ([]Flag, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT key, enabled, description, updated_by, updated_at
+		FROM platform_flags ORDER BY key
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []Flag{}
+	for rows.Next() {
+		var f Flag
+		if err := rows.Scan(&f.Key, &f.Enabled, &f.Description, &f.UpdatedBy, &f.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// SetFlag records a new value and appends to the flag's history. Both happen in
+// one transaction: a flag whose current value is not in its own history cannot
+// be explained after the fact.
+func (s *Store) SetFlag(ctx context.Context, key string, enabled bool, changedBy, changeRequestID string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var crID *string
+	if changeRequestID != "" {
+		crID = &changeRequestID
+	}
+	ct, err := tx.Exec(ctx, `
+		UPDATE platform_flags
+		SET enabled = $2, updated_by = $3, updated_at = now(), change_request_id = $4
+		WHERE key = $1
+	`, key, enabled, changedBy, crID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("%w: flag %q", ErrNotFound, key)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO platform_flag_history (key, enabled, changed_by, change_request_id)
+		VALUES ($1,$2,$3,$4)
+	`, key, enabled, changedBy, crID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}

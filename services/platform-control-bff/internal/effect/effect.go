@@ -33,6 +33,8 @@ type Request struct {
 	// service records it, so the effect traces back to the approval.
 	ChangeRequestID string
 	Reason          string
+	// Payload carries action-specific values, such as which flag to change.
+	Payload map[string]any
 	// OperatorSession is the applying operator's session, forwarded so the
 	// owning service verifies an authenticated operator itself rather than
 	// trusting this service's say-so.
@@ -43,14 +45,25 @@ type Applier interface {
 	Apply(ctx context.Context, req Request) error
 }
 
+// FlagSetter is how the applier reaches the control plane's own flag store.
+// The kill switch is the one action whose owning service is this service.
+type FlagSetter interface {
+	SetFlag(ctx context.Context, key string, enabled bool, changedBy, changeRequestID string) error
+}
+
 // HTTPApplier routes actions to the services that own them.
 type HTTPApplier struct {
 	LedgerURL string
 	Client    *http.Client
+	Flags     FlagSetter
 }
 
-func NewHTTPApplier(ledgerURL string) *HTTPApplier {
-	return &HTTPApplier{LedgerURL: ledgerURL, Client: &http.Client{Timeout: 10 * time.Second}}
+func NewHTTPApplier(ledgerURL string, flags FlagSetter) *HTTPApplier {
+	return &HTTPApplier{
+		LedgerURL: ledgerURL,
+		Client:    &http.Client{Timeout: 10 * time.Second},
+		Flags:     flags,
+	}
 }
 
 func (a *HTTPApplier) Apply(ctx context.Context, req Request) error {
@@ -59,12 +72,33 @@ func (a *HTTPApplier) Apply(ctx context.Context, req Request) error {
 		return a.wallet(ctx, req, "freeze")
 	case "wallet.unfreeze":
 		return a.wallet(ctx, req, "unfreeze")
+	case "kill_switch":
+		// Stopping sends is the whole point of a kill switch, so it disables
+		// rather than toggles: an operator reaching for it wants payments
+		// stopped, not flipped to whatever the opposite of the current state
+		// happens to be.
+		return a.setFlag(ctx, req, "payments.sends_enabled", false)
+	case "resume_payments":
+		return a.setFlag(ctx, req, "payments.sends_enabled", true)
+	case "features.edit":
+		enabled, ok := req.Payload["enabled"].(bool)
+		key, hasKey := req.Payload["key"].(string)
+		if !ok || !hasKey {
+			return fmt.Errorf("features.edit requires a key and an enabled value")
+		}
+		return a.setFlag(ctx, req, key, enabled)
 	default:
-		// kill_switch, features.edit, provider.approve and mandate.change have
-		// no owning service in this codebase yet. Refused, so that nothing is
-		// recorded as applied when it was not.
+		// provider.approve and mandate.change still have no owning service.
+		// Refused, so that nothing is recorded as applied when it was not.
 		return fmt.Errorf("%w: %s", ErrNoOwningService, req.Action)
 	}
+}
+
+func (a *HTTPApplier) setFlag(ctx context.Context, req Request, key string, enabled bool) error {
+	if a.Flags == nil {
+		return fmt.Errorf("%w: no flag store configured", ErrNoOwningService)
+	}
+	return a.Flags.SetFlag(ctx, key, enabled, "change:"+req.ChangeRequestID, req.ChangeRequestID)
 }
 
 func (a *HTTPApplier) wallet(ctx context.Context, req Request, verb string) error {
