@@ -3,15 +3,15 @@ package workflow
 // DomesticTransferInput is the Temporal workflow input.
 // AuthorisationRef must be set before Execute activity runs.
 type DomesticTransferInput struct {
-	TransferID       string `json:"transferId"`
-	IdempotencyKey   string `json:"idempotencyKey"`
-	AmountMinor      int64  `json:"amountMinor"`
-	Currency         string `json:"currency"`
-	RecipientName    string `json:"recipientName"`
-	RecipientHint    string `json:"recipientHint"`
-	FromExternalRef  string `json:"fromExternalRef"`
-	ToExternalRef    string `json:"toExternalRef"`
-	Rail             string `json:"rail"` // mobile-money-sim | bank-transfer-sim
+	TransferID      string `json:"transferId"`
+	IdempotencyKey  string `json:"idempotencyKey"`
+	AmountMinor     int64  `json:"amountMinor"`
+	Currency        string `json:"currency"`
+	RecipientName   string `json:"recipientName"`
+	RecipientHint   string `json:"recipientHint"`
+	FromExternalRef string `json:"fromExternalRef"`
+	ToExternalRef   string `json:"toExternalRef"`
+	Rail            string `json:"rail"` // mobile-money-sim | bank-transfer-sim
 	// FeeMinor is fixed when the transfer is prepared and is covered by the
 	// authorisation grant's binding. It is not recomputed later, so the fee the
 	// user authorised is the fee the ledger posts (ADR 0005).

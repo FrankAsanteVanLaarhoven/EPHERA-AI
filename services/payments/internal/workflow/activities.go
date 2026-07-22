@@ -2,9 +2,13 @@ package workflow
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/ephera/authgrant"
 	"github.com/ephera/payments/internal/adapter"
@@ -22,6 +26,12 @@ type Activities struct {
 	mu     sync.Mutex
 	// receipts kept in-process for sandbox GET
 	receipts map[string]Receipt
+	// authPublicKey verifies grant signatures BEFORE the irreversible rail runs.
+	// The ledger verifies authoritatively at capture, but capture is downstream
+	// of the rail payout, so without this a forged grant reaches the rail before
+	// anyone checks its signature. Empty means the worker fails closed: it will
+	// not run a rail it cannot first authorise.
+	authPublicKey ed25519.PublicKey
 }
 
 func NewActivities() *Activities {
@@ -32,7 +42,7 @@ func NewActivities() *Activities {
 	if ledgerURL == "" {
 		ledgerURL = "http://localhost:8092"
 	}
-	return &Activities{
+	a := &Activities{
 		rails: map[string]adapter.Rail{
 			mm.Name(): mm,
 			bk.Name(): bk,
@@ -41,6 +51,20 @@ func NewActivities() *Activities {
 		ledger:   ledgerclient.New(ledgerURL),
 		receipts: make(map[string]Receipt),
 	}
+	// The grant-signing public key — the identity service's public key, the same
+	// value the ledger holds, so a dedicated var falls back to the ledger's.
+	// Without it the worker refuses to authorise, and so refuses to run a rail.
+	pubHex := os.Getenv("PAYMENTS_AUTH_PUBLIC_KEY")
+	if pubHex == "" {
+		pubHex = os.Getenv("LEDGER_AUTH_PUBLIC_KEY")
+	}
+	if raw, err := hex.DecodeString(pubHex); err == nil && len(raw) == ed25519.PublicKeySize {
+		a.authPublicKey = ed25519.PublicKey(raw)
+	} else {
+		log.Printf("WARNING: no valid grant public key configured " +
+			"(PAYMENTS_AUTH_PUBLIC_KEY / LEDGER_AUTH_PUBLIC_KEY); the worker will refuse to authorise transfers")
+	}
+	return a
 }
 
 func (a *Activities) Quote(ctx context.Context, rail string, amountMinor int64, currency string) (adapter.Quote, error) {
@@ -51,23 +75,29 @@ func (a *Activities) Quote(ctx context.Context, rail string, amountMinor int64, 
 	return r.Quote(ctx, amountMinor, currency, currency)
 }
 
-// RequireAuthorisation is a fail-fast pre-check, NOT an authorisation decision.
+// RequireAuthorisation verifies the grant's SIGNATURE and binding before the
+// workflow places a hold or runs a rail.
 //
-// It parses the grant without verifying its signature and confirms it claims to
-// be bound to this exact transfer, so the workflow does not place a hold and
-// call a rail for a grant that will be refused at capture. The authority is the
-// ledger, which verifies the signature, the validity window and the binding,
-// and consumes the grant so it cannot be used twice (ADR 0001, ADR 0002).
+// This used to be a signature-free pre-check: it parsed the grant and compared
+// its binding, but left the signature to be checked at capture — which runs
+// AFTER the irreversible rail payout. A client that knew the transfer fields
+// could therefore compute the correct binding digest, present a grant with a
+// forged signature, pass this check and the rail, and only be refused at
+// capture, by which point the money had left (H1). The signature is now checked
+// here, before anything irreversible happens.
 //
-// Before G2 this was a length check -- any string of eight characters was
-// accepted (D-01).
+// The ledger remains the authority: it verifies again and, crucially, consumes
+// the grant single-use in the same transaction as the postings (ADR 0001, ADR
+// 0002). This is defence in depth at the point before the irreversible action,
+// not a replacement for the ledger's check.
+//
+// It fails closed: with no public key configured, no transfer is authorised.
 func (a *Activities) RequireAuthorisation(_ context.Context, in DomesticTransferInput) error {
 	if in.AuthorisationRef == "" {
 		return fmt.Errorf("missing authorisation grant: voice alone is never sufficient")
 	}
-	claimed, err := authgrant.ParseUnverified(in.AuthorisationRef)
-	if err != nil {
-		return fmt.Errorf("authorisation is not a grant: %w", err)
+	if len(a.authPublicKey) == 0 {
+		return fmt.Errorf("no grant public key configured; the transfer cannot be authorised")
 	}
 	want := authgrant.Binding{
 		FromExternalRef: in.FromExternalRef,
@@ -77,8 +107,10 @@ func (a *Activities) RequireAuthorisation(_ context.Context, in DomesticTransfer
 		Currency:        in.Currency,
 		TransferID:      in.TransferID,
 	}
-	if claimed.Binding != want.Digest() {
-		return fmt.Errorf("authorisation grant is not bound to this transfer")
+	if _, err := authgrant.Verify(a.authPublicKey, in.AuthorisationRef, want, time.Now()); err != nil {
+		// Every verification failure is an authorisation failure. The specific
+		// reason aids diagnosis; it does not help a caller find an accepted shape.
+		return fmt.Errorf("authorisation grant is not valid for this transfer: %w", err)
 	}
 	return nil
 }

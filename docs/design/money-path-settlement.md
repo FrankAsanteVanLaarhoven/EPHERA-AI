@@ -1,12 +1,19 @@
 # Design proposal: money-path ordering and settlement
 
-**Status: proposal, awaiting decision. Not implemented.**
+**Status: Option A IMPLEMENTED (commit pending). Option B awaiting decision.**
+
+Update: the signature-before-rail step (Option A / H1) has been implemented and
+tested — `RequireAuthorisation` now verifies the grant signature and binding
+before any hold or rail, and fails closed with no key configured. A forged-
+signature grant is refused before the rail, proven by a test. Option B (the
+capture-before-rail settlement reorder, which fully closes H2) still needs the
+decision below.
 
 This is the one red-team finding I did not fix in place, because the correct fix
 changes settlement semantics and should be agreed before it is written. It
 covers three coupled findings:
 
-- **H1** — the irreversible rail executes *before* the grant signature is verified.
+- **H1 — DONE.** ~~the irreversible rail executes before the grant signature is verified.~~ Fixed: signature verified before the rail, fail-closed, tested.
 - **H2** — a capture failure does not release the hold (compensation gap).
 - **H8** (related) — the rail adapter ignores the idempotency key, so a retry can
   pay twice.
@@ -115,8 +122,8 @@ it unilaterally.
 
 ## 4. The decision I need
 
-1. **Approve Option A now?** (verify signature at payments before the rail — low
-   risk, closes H1). I can implement and test this immediately.
+1. ~~**Approve Option A now?**~~ **Done** — signature verified before the rail,
+   fail-closed, tested.
 2. **For Option B, which settlement model:**
    - (a) Settlement suspense account + reversal entry (capture-before-rail, full
      H1/H2 closure), or
@@ -126,9 +133,8 @@ it unilaterally.
 3. **Confirm rail idempotency (H8)** is in scope for the settlement work, since
    Option B is unsafe without it.
 
-Nothing in this document is implemented. On your answer I will do Option A first
-(small, tested), then scope Option B as its own milestone with migrations,
-compensation tests, and a rollback plan.
+Option A is implemented and tested. On your answer to (2) I will scope Option B
+as its own milestone with migrations, compensation tests, and a rollback plan.
 
 ---
 
