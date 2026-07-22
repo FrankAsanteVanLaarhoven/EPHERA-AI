@@ -66,3 +66,8 @@ test-results/
 
 # Local debug / crop reference dumps
 apps/mobile/assets/_*.png
+
+# Datasets are licensed under competition terms and are not redistributed.
+# Notebooks verify the input by sha256 instead.
+*.csv
+!packages/**/fixtures/*.csv
