@@ -45,6 +45,16 @@ export function ControlPlanePanel() {
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Resolved after mount, not during render. The support check reads `window`,
+  // so calling it while rendering returns false on the server and true in the
+  // browser -- a hydration mismatch, which React recovers from by throwing away
+  // the server markup.
+  const [canUsePasskeys, setCanUsePasskeys] = useState(false);
+  useEffect(() => {
+    setCanUsePasskeys(passkeysSupported());
+  }, []);
+
+
   const [action, setAction] = useState(ACTIONS[0]);
   const [target, setTarget] = useState("user:demo-self:GHS");
   const [reason, setReason] = useState("");
@@ -84,7 +94,7 @@ export function ControlPlanePanel() {
           session it returns is verified by the control plane, which resolves
           what you may do from its own records.
         </p>
-        {!passkeysSupported() ? (
+        {!canUsePasskeys ? (
           <p className="danger">
             This browser cannot use passkeys, so it cannot sign in to the control plane.
           </p>
@@ -95,7 +105,7 @@ export function ControlPlanePanel() {
           <button
             type="button"
             className="btn"
-            disabled={busy || !passkeysSupported()}
+            disabled={busy || !canUsePasskeys}
             onClick={() => void run(() => operatorLogin(subject))}
           >
             Sign in with passkey
@@ -103,7 +113,7 @@ export function ControlPlanePanel() {
           <button
             type="button"
             className="btn secondary"
-            disabled={busy || !passkeysSupported()}
+            disabled={busy || !canUsePasskeys}
             onClick={() => void run(() => registerOperatorPasskey(subject))}
           >
             Register passkey

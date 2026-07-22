@@ -34,6 +34,15 @@ export function CaseQueue() {
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Resolved after mount, not during render. The support check reads `window`,
+  // so calling it while rendering returns false on the server and true in the
+  // browser -- a hydration mismatch, which React recovers from by throwing away
+  // the server markup.
+  const [canUsePasskeys, setCanUsePasskeys] = useState(false);
+  useEffect(() => {
+    setCanUsePasskeys(passkeysSupported());
+  }, []);
+
   const refresh = useCallback(async () => {
     if (!storedSession()) {
       setMe(null);
@@ -66,7 +75,7 @@ export function CaseQueue() {
           plane decides what you may do, and every decision you make is recorded
           against you.
         </p>
-        {!passkeysSupported() ? (
+        {!canUsePasskeys ? (
           <p className="danger">This browser cannot use passkeys.</p>
         ) : null}
         <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
@@ -74,7 +83,7 @@ export function CaseQueue() {
           <button
             type="button"
             className="btn"
-            disabled={busy || !passkeysSupported()}
+            disabled={busy || !canUsePasskeys}
             onClick={() => void run(() => login(subject))}
           >
             Sign in with passkey
@@ -82,7 +91,7 @@ export function CaseQueue() {
           <button
             type="button"
             className="btn secondary"
-            disabled={busy || !passkeysSupported()}
+            disabled={busy || !canUsePasskeys}
             onClick={() => void run(() => registerPasskey(subject))}
           >
             Register passkey

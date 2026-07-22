@@ -199,14 +199,6 @@ export type Overview = {
     voice: boolean;
     temporalUi: string;
   };
-  demoWallet?: {
-    externalRef: string;
-    availableMinor: number;
-    balanceMinor: number;
-    holdMinor: number;
-    status: string;
-    currency: string;
-  };
   kpis: {
     activeUsers24h: number;
     txVolume24hMinor: number;

@@ -17,16 +17,6 @@ export async function GET() {
 
   const recommendations: Overview["recommendations"] = [];
 
-  if (live.demoWallet && live.demoWallet.availableMinor < 50_00) {
-    recommendations.push({
-      id: "rec_fund_demo",
-      priority: "P0",
-      title: "Demo wallet underfunded for ₵50 transfers",
-      detail: `user:demo-self:GHS available ${live.demoWallet.availableMinor / 100} ${live.demoWallet.currency}. Temporal DomesticTransferSim fails at PostLedgerHold with insufficient_funds (e.g. transfer-pwa_1784617797470). Top up sandbox ledger or lower PWA default amount.`,
-      actionLabel: "View workflows",
-      actionId: "nav_workflows",
-    });
-  }
 
   if (store.providers.some((p) => p.status === "degraded")) {
     recommendations.push({
@@ -67,7 +57,6 @@ export async function GET() {
       voice: live.voice,
       temporalUi: live.temporalUi,
     },
-    demoWallet: live.demoWallet,
     kpis: {
       activeUsers24h: store.devices.reduce((s, d) => s + d.activeToday, 0),
       txVolume24hMinor: vol + 2_450_000_00,

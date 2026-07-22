@@ -284,26 +284,11 @@ export function AdminShell() {
             <div className="grid two">
               <div className="card">
                 <h3>Live demo wallet (ledger)</h3>
-                {overview.demoWallet ? (
-                  <div className="stack-sm">
-                    <div className="row-between">
-                      <span className="mono">{overview.demoWallet.externalRef}</span>
-                      <span className={`tag ${overview.demoWallet.status}`}>{overview.demoWallet.status}</span>
-                    </div>
-                    <div className="kpi-val">
-                      {money(overview.demoWallet.availableMinor, overview.demoWallet.currency)}{" "}
-                      <span style={{ fontSize: 14, color: "var(--muted)" }}>available</span>
-                    </div>
-                    <p className="msg">
-                      Balance {money(overview.demoWallet.balanceMinor)} · Holds{" "}
-                      {money(overview.demoWallet.holdMinor)}. Transfers of ₵50+ fail with{" "}
-                      <span className="mono">insufficient_funds</span> when available &lt; amount —
-                      matching Temporal <span className="mono">PostLedgerHold</span> errors.
-                    </p>
-                  </div>
-                ) : (
-                  <p className="msg">Ledger unreachable — start ledger on :8092</p>
-                )}
+                <p className="msg">
+                  Live customer balances are not shown here. The ledger
+                  authenticates its callers, and this console holds no ledger
+                  credential by design — balances belong to the control plane.
+                </p>
               </div>
 
               <div className="card">

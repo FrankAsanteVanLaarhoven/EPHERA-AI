@@ -81,6 +81,15 @@ export function PwaShell() {
   const [installed, setInstalled] = useState(false);
   const [installEnv, setInstallEnv] = useState<InstallEnv>("checking");
 
+  // Resolved after mount, not during render. The support check reads `window`,
+  // so calling it while rendering returns false on the server and true in the
+  // browser -- a hydration mismatch, which React recovers from by throwing away
+  // the server markup.
+  const [canUsePasskeys, setCanUsePasskeys] = useState(false);
+  useEffect(() => {
+    setCanUsePasskeys(passkeysSupported());
+  }, []);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     const b = await fetchBalance();
@@ -291,11 +300,11 @@ export function PwaShell() {
             >
               {busy
                 ? "Working…"
-                : passkeysSupported()
+                : canUsePasskeys
                   ? "Authorise with passkey & send"
                   : "Authorise & send (sandbox)"}
             </button>
-            {passkeysSupported() ? (
+            {canUsePasskeys ? (
               <button
                 type="button"
                 className="btn secondary"
@@ -307,7 +316,7 @@ export function PwaShell() {
             ) : null}
           </div>
           <p style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.5, marginTop: 10 }}>
-            {passkeysSupported()
+            {canUsePasskeys
               ? "Your passkey signs the exact transfer — recipient, amount and fee. A signature for one payment cannot authorise another."
               : "This browser has no passkey support, so the sandbox authenticator is used. It does not prove a person approved the payment."}
           </p>

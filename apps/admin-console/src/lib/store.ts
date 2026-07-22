@@ -1099,48 +1099,23 @@ export async function probeLive() {
     }
   }
 
-  let demoWallet: {
-    externalRef: string;
-    availableMinor: number;
-    balanceMinor: number;
-    holdMinor: number;
-    status: string;
-    currency: string;
-  } | undefined;
-
-  try {
-    const r = await fetch(`${base.ledgerUrl}/v1/accounts/user:demo-self:GHS`, {
-      signal: AbortSignal.timeout(1500),
-    });
-    if (r.ok) {
-      const a = (await r.json()) as {
-        externalRef: string;
-        availableMinor: number;
-        balanceMinor: number;
-        holdMinor: number;
-        status: string;
-        currency: string;
-      };
-      demoWallet = {
-        externalRef: a.externalRef,
-        availableMinor: a.availableMinor,
-        balanceMinor: a.balanceMinor,
-        holdMinor: a.holdMinor,
-        status: a.status,
-        currency: a.currency,
-      };
-      const u = users.find((x) => x.id === "user_demo");
-      if (u) u.balanceMinor = a.availableMinor;
-    }
-  } catch {
-    /* offline */
-  }
+  // The console no longer reads a customer balance from the ledger.
+  //
+  // The ledger authenticates its callers (D-02), and a console must not hold a
+  // ledger credential — that is what the control plane is for (ADR 0003). This
+  // probe used to fetch the demo wallet directly and, when it failed, told the
+  // operator to "start ledger on :8092" even when the ledger was running
+  // perfectly well and simply refusing an unauthenticated caller. A control
+  // surface that misdiagnoses its own failure is worse than one that stays
+  // quiet.
+  //
+  // Live balances return when the control plane exposes them to an
+  // authenticated operator.
 
   return {
     payments: await ok(`${base.paymentsUrl}/health`),
     ledger: await ok(`${base.ledgerUrl}/health`),
     voice: await ok(`${base.voiceUrl}/health`),
     temporalUi: base.temporalUi,
-    demoWallet,
   };
 }
