@@ -9,7 +9,6 @@ import {
   createLinkToken,
   createSwiftMessage,
   exchangePublicToken,
-  issueApiKey,
   listInstitutions,
 } from "@ephera/connect-layer";
 
@@ -161,6 +160,14 @@ export const providerStore = {
     return app;
   },
 
+  /**
+   * Record an approval decision.
+   *
+   * Credential issuance used to happen here, inline with the status change, and
+   * returned the raw secret to the caller (D-09). It has moved out: approving a
+   * provider is a control-plane change requiring a second operator, and the
+   * secret is delivered once through a channel that is not this response body.
+   */
   setAdminStatus(
     id: string,
     status: ProviderApplication["status"],
@@ -171,16 +178,6 @@ export const providerStore = {
     app.status = status;
     app.adminNotes.push(note);
     app.updatedAt = new Date().toISOString();
-    if (status === "approved") {
-      const { credential, rawSecret } = issueApiKey(id, ["payments:write", "webhooks:receive"]);
-      credentials.push({
-        providerAppId: id,
-        publicId: credential.publicId,
-        fingerprint: credential.secretFingerprint,
-        scopes: credential.scopes,
-      });
-      return { app, issuedSecretOnce: rawSecret, publicId: credential.publicId };
-    }
     return { app };
   },
 

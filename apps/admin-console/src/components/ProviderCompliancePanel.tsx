@@ -66,11 +66,9 @@ export function ProviderCompliancePanel({ flash }: { flash: (m: string) => void 
       }),
     });
     const j = await r.json();
-    if (j.issuedSecretOnce) {
-      flash(`Approved · API secret issued once: ${j.publicId} / (secret only in response logs — rotate in prod)`);
-    } else {
-      flash(`Application → ${status}`);
-    }
+    // The approval response used to carry the raw payments:write secret, which
+    // was then rendered into this toast and written to logs (D-09). Credentials
+    // are no longer minted by an approval and no secret crosses this boundary.
     void load();
   }
 

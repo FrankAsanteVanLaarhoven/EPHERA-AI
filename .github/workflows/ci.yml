@@ -48,6 +48,7 @@ jobs:
           npm run test -w @ephera/validation
           npm run test -w @ephera/passkeys
           npm run test -w @ephera/offline-queue
+          npm run test -w @ephera/connect-layer
 
   apps:
     name: browser applications

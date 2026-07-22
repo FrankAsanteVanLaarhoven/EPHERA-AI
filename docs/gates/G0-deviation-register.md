@@ -40,6 +40,13 @@ Reduced at G2-A and G2-B — see [`G2-report.md`](G2-report.md).
 | D-34 | S1 | The idempotency key is derived from the intent and amount rather than the clock, so a retry is the same transfer. A repeat also now fails on grant single use |
 | D-19 | S2 | One fee function serves quote, prepare, grant binding and capture |
 
+Addressed at G4 — see [`G4-report.md`](G4-report.md).
+
+| ID | Sev | State |
+| --- | --- | --- |
+| D-10 | S1 | **Closed.** The fake cryptography is replaced with Web Crypto: CSPRNG secrets, HMAC-SHA-256 fingerprints under a server-held pepper, HMAC-SHA-256 webhook signatures over a length-prefixed message, constant-time comparison, and a real nonce store for replay protection. Sandbox credentials are no longer labelled `live`. Controls that cannot be implemented here — mutual TLS, key management, envelope encryption — are absent rather than represented by a boolean. 14 tests |
+| D-09 | S1 | **Partly closed.** The two mechanisms are gone: the unrestricted patch merge now rejects any field an applicant does not own (so `status` cannot be self-set), and approval no longer mints a credential or returns a raw secret in the response body. **Still open**: the portal has no authentication, so approval is not yet gated on an authenticated operator |
+
 Addressed at G2-C — see [`G2C-report.md`](G2C-report.md). The control plane
 exists and is tested; **the console has not been migrated onto it**, so the
 unauthenticated surface is still live and these stay open.

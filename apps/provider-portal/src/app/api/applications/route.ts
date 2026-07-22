@@ -75,7 +75,37 @@ export async function PATCH(req: Request) {
     return NextResponse.json(app);
   }
   if (body.patch) {
-    const app = providerStore.update(body.id, body.patch);
+    // Only fields an applicant owns may be patched. The previous version
+    // blind-merged whatever was sent, so an applicant could set its own
+    // `status` to "approved", rewrite its own compliance documents, or edit
+    // another provider's record entirely (D-09).
+    const allowed = [
+      "legalName", "tradingName", "category", "countries", "primaryCountry",
+      "registrationNumber", "taxId", "website", "contactName", "contactEmail",
+      "contactPhone", "servicesOffered", "webhookUrl", "ipAllowlist", "mtlsReady",
+    ] as const;
+    const patch: Partial<ProviderApplication> = {};
+    const rejected: string[] = [];
+    for (const [k, v] of Object.entries(body.patch)) {
+      if ((allowed as readonly string[]).includes(k)) {
+        (patch as Record<string, unknown>)[k] = v;
+      } else {
+        rejected.push(k);
+      }
+    }
+    if (rejected.length > 0) {
+      return NextResponse.json(
+        {
+          error: "field_not_editable",
+          message:
+            "These fields are not applicant-editable. Status changes require an " +
+            "approved control-plane change with a second operator.",
+          fields: rejected,
+        },
+        { status: 403 },
+      );
+    }
+    const app = providerStore.update(body.id, patch);
     if (!app) return NextResponse.json({ error: "not_found" }, { status: 404 });
     return NextResponse.json(app);
   }
