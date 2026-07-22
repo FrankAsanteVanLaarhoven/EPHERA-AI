@@ -120,3 +120,27 @@ func TestSandboxEnrolmentStaysOpen(t *testing.T) {
 		t.Fatalf("sandbox registration was blocked: %d %v", code, body)
 	}
 }
+
+// L2/L3: outside a sandbox, the signing key must be real and not the published
+// example. loadOrCreateKey refuses both, so a production deployment cannot
+// silently run with a forgeable or ephemeral key.
+func TestProductionRefusesWeakSigningKey(t *testing.T) {
+	if _, _, err := loadOrCreateKey("production", ""); err == nil {
+		t.Error("production accepted an empty seed (ephemeral key)")
+	}
+	if _, _, err := loadOrCreateKey("production", exampleSeed); err == nil {
+		t.Error("production accepted the published example seed")
+	}
+	// A real seed is fine in production.
+	real := "1111111111111111111111111111111111111111111111111111111111111111"
+	if _, _, err := loadOrCreateKey("production", real); err != nil {
+		t.Errorf("production rejected a real seed: %v", err)
+	}
+	// The sandbox may use the example seed and an ephemeral key.
+	if _, _, err := loadOrCreateKey("sandbox", exampleSeed); err != nil {
+		t.Errorf("sandbox rejected the example seed: %v", err)
+	}
+	if _, _, err := loadOrCreateKey("local", ""); err != nil {
+		t.Errorf("local rejected an ephemeral key: %v", err)
+	}
+}

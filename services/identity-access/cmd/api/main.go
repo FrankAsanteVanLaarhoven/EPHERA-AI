@@ -40,9 +40,10 @@ import (
 )
 
 type server struct {
-	priv        ed25519.PrivateKey
-	pub         ed25519.PublicKey
-	sandboxMint bool
+	priv           ed25519.PrivateKey
+	pub            ed25519.PublicKey
+	sandboxMint    bool
+	allowedOrigins []string
 	// enrolmentOpen allows registering a passkey with no enrolment token.
 	// True only in a sandbox environment; production requires a token so a
 	// credential cannot be registered for a subject the caller does not control.
@@ -53,9 +54,9 @@ type server struct {
 
 func main() {
 	httpAddr := env("IDENTITY_HTTP_ADDR", ":8093")
-	environment := env("EPHERA_ENV", "local")
+	environment := env("EPHERA_ENV", "production")
 
-	priv, pub, err := loadOrCreateKey(os.Getenv("IDENTITY_SIGNING_SEED"))
+	priv, pub, err := loadOrCreateKey(environment, os.Getenv("IDENTITY_SIGNING_SEED"))
 	if err != nil {
 		log.Fatalf("signing key: %v", err)
 	}
@@ -98,7 +99,7 @@ func main() {
 		log.Printf("passkey enrolment requires an operator-provisioned enrolment token")
 	}
 
-	s := &server{priv: priv, pub: pub, sandboxMint: sandboxMint, enrolmentOpen: enrolmentOpen, store: st, passkeys: pk}
+	s := &server{priv: priv, pub: pub, sandboxMint: sandboxMint, allowedOrigins: origins, enrolmentOpen: enrolmentOpen, store: st, passkeys: pk}
 
 	log.Printf("EPHERA identity-access on %s (env %s)", httpAddr, environment)
 	log.Printf("authorisation public key: %s", hex.EncodeToString(pub))
@@ -121,14 +122,27 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/grants", s.mintGrant)
 	mux.HandleFunc("POST /v1/operators/session/challenge", s.operatorSessionChallenge)
 	mux.HandleFunc("POST /v1/operators/session", s.operatorSession)
-	return withCORS(mux)
+	return withCORS(mux, s.allowedOrigins)
 }
 
-// loadOrCreateKey derives the signing key from a seed when one is supplied, so
-// a local stack can be restarted without invalidating the ledger's configured
-// public key. With no seed it generates an ephemeral key and says so.
-func loadOrCreateKey(seedHex string) (ed25519.PrivateKey, ed25519.PublicKey, error) {
+// exampleSeed is the value shipped in .env.example. It is published, so anyone
+// can derive the private key from it; it must never sign anything in production.
+const exampleSeed = "0000000000000000000000000000000000000000000000000000000000000001"
+
+// loadOrCreateKey derives the signing key from a seed when one is supplied, so a
+// local stack can be restarted without invalidating the ledger's configured
+// public key. Outside a sandbox it refuses an ephemeral key and the published
+// example seed, both of which would break or forge grant verification.
+func loadOrCreateKey(environment, seedHex string) (ed25519.PrivateKey, ed25519.PublicKey, error) {
+	prod := environment != "local" && environment != "sandbox"
+
 	if seedHex == "" {
+		if prod {
+			// An ephemeral key in production is broken, not just risky: it will
+			// not match the public key the ledger is configured with, so no
+			// grant it signs will verify, and it changes on every restart.
+			return nil, nil, fmt.Errorf("IDENTITY_SIGNING_SEED must be set outside a sandbox environment")
+		}
 		pub, priv, err := ed25519.GenerateKey(nil)
 		if err != nil {
 			return nil, nil, err
@@ -136,6 +150,12 @@ func loadOrCreateKey(seedHex string) (ed25519.PrivateKey, ed25519.PublicKey, err
 		log.Printf("WARNING: IDENTITY_SIGNING_SEED not set; generated an ephemeral signing key. " +
 			"Grants will stop verifying when this process restarts.")
 		return priv, pub, nil
+	}
+	if prod && seedHex == exampleSeed {
+		// The published example seed would let anyone forge grants and operator
+		// sessions. Refuse to start rather than run with a key everyone knows.
+		return nil, nil, fmt.Errorf("IDENTITY_SIGNING_SEED is the published example value; " +
+			"it cannot be used outside a sandbox environment")
 	}
 	seed, err := hex.DecodeString(seedHex)
 	if err != nil {
@@ -259,11 +279,24 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func withCORS(next http.Handler) http.Handler {
+// withCORS answers only the configured origins. It was previously a wildcard,
+// which on a service that mints payment grants and operator sessions means any
+// web page could drive the registration and grant flows. WebAuthn binds the
+// assertion to its own origin, but registration and enrolment issuance do not,
+// so the allowlist matters. The origins are the same ones WebAuthn is
+// configured for (IDENTITY_RP_ORIGINS).
+func withCORS(next http.Handler, allowed []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		origin := r.Header.Get("Origin")
+		for _, a := range allowed {
+			if origin != "" && strings.TrimSpace(a) == origin {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+				break
+			}
+		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
