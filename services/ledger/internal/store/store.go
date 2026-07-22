@@ -303,6 +303,15 @@ func (s *Store) CaptureTransfer(ctx context.Context, req TransferRequest) (strin
 		if err != nil {
 			return "", fmt.Errorf("hold: %w", err)
 		}
+		// The hold must belong to the account being debited. The grant binding
+		// does not cover the hold id, so a caller could otherwise pass a hold
+		// belonging to an unrelated account: this transfer would debit the
+		// sender while prematurely releasing a third party's reservation,
+		// raising that account's available balance and leaving its own transfer
+		// to find its hold already captured (M3).
+		if holdAcct != from.ID {
+			return "", fmt.Errorf("%w: hold does not belong to the paying account", ErrInvalidRequest)
+		}
 		if holdStatus == "open" {
 			_, err = tx.Exec(ctx, `UPDATE holds SET status='captured', updated_at=now() WHERE id=$1`, holdUUID)
 			if err != nil {

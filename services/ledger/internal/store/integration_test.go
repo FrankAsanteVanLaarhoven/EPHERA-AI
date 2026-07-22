@@ -759,3 +759,38 @@ func TestSandboxAuthenticatorGrantRefusedByDefault(t *testing.T) {
 		t.Fatalf("sandbox grant refused even after opting in: %v", err)
 	}
 }
+
+// M3: a capture must not release a hold that belongs to a different account.
+// The grant binding does not cover the hold id, so the ledger checks ownership.
+func TestCaptureRejectsAHoldFromAnotherAccount(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	sender := openWallet(t, st, "GHS", 100_000)
+	victim := openWallet(t, st, "GHS", 100_000)
+	recipient := openWallet(t, st, "GHS", 0)
+
+	// The victim places a legitimate hold on their own funds.
+	victimHold, err := st.PlaceHold(ctx, HoldRequest{
+		FromExternalRef: victim, AmountMinor: 40_000, Currency: "GHS",
+		TransferID: "tx_" + uuid.NewString(), IdempotencyKey: "idem_" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("victim hold: %v", err)
+	}
+
+	// The sender tries to capture a transfer citing the victim's hold id.
+	req := authorised(t, TransferRequest{
+		FromExternalRef: sender, ToExternalRef: recipient,
+		AmountMinor: 10_000, Currency: "GHS",
+		TransferID: "tx_" + uuid.NewString(), IdempotencyKey: "idem_" + uuid.NewString(),
+		HoldID: victimHold,
+	})
+	if _, err := st.CaptureTransfer(ctx, req); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("a capture released another account's hold: %v", err)
+	}
+	// The victim's hold is untouched.
+	if got := balanceOf(t, st, victim); got != 100_000 {
+		t.Fatalf("victim balance changed: %d", got)
+	}
+}
