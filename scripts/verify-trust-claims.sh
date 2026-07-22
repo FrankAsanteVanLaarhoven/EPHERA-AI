@@ -112,6 +112,30 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+head_ "7b. Bounded authority, as a standalone module"
+if (cd modules/boundedauth && go test ./... -race >/tmp/ephera-verify.log 2>&1); then
+  green "credential format, single-use conformance, receipts (race detector on)"
+else
+  red "boundedauth"
+  tail -5 /tmp/ephera-verify.log | sed 's/^/        /'
+fi
+# The suite is only worth its name if it fails a store that does not satisfy the
+# contract, so that is asserted rather than assumed.
+if (cd modules/boundedauth && go test ./conformance/... -race -count=3 >/tmp/ephera-verify.log 2>&1); then
+  green "the conformance suite fails two deliberately broken stores"
+else
+  red "conformance suite self-test"
+fi
+# A specification nobody else can implement is documentation. This reproduces
+# every published vector from an implementation in another language.
+if out=$(cd modules/boundedauth && python3 testdata/verify_vectors.py 2>&1); then
+  green "test vectors reproduced in a second language ($(printf '%s' "$out" | tail -1))"
+else
+  red "test vectors not reproducible"
+  printf '%s\n' "$out" | tail -5 | sed 's/^/        /'
+fi
+
+# ---------------------------------------------------------------------------
 head_ "8. Database-level guarantees (not only application code)"
 if have_pg; then
   psql_() { "$DOCKER" compose -f infrastructure/docker-compose.yml exec -T postgres \
