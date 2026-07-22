@@ -58,7 +58,7 @@ function toHex(bytes: ArrayBuffer | Uint8Array): string {
 }
 
 /** base64url of cryptographically random bytes. */
-function randomToken(byteLength: number): string {
+export function randomToken(byteLength: number): string {
   const bytes = new Uint8Array(byteLength);
   requireCrypto().getRandomValues(bytes);
   let bin = "";

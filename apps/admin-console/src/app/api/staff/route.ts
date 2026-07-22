@@ -30,9 +30,13 @@ const staff: StaffMember[] = [...SEED_STAFF];
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const asRole = (searchParams.get("asRole") as StaffRole) || "super_admin";
   const actorId = searchParams.get("actorId") || "staff_super";
   const actor = staff.find((s) => s.id === actorId) || staff[0];
+  // The demo role switcher defaults to the actor's OWN role, not super_admin.
+  // Defaulting a client-supplied role to the highest privilege — even for a
+  // read-only preview — is the wrong default to model. Real authorisation will
+  // come from a signed operator session when this console is rebuilt.
+  const asRole = (searchParams.get("asRole") as StaffRole) || actor.role;
 
   return NextResponse.json({
     hierarchy: Object.entries(ROLE_LEVEL)

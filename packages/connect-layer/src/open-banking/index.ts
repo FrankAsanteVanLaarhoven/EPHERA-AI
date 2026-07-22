@@ -1,3 +1,4 @@
+import { randomToken } from "../security/index";
 /**
  * EPHERA Open Banking layer — Plaid-like AIS/PIS abstraction.
  * Sandbox only: no live bank credentials. Swap adapters for licensed markets.
@@ -105,7 +106,7 @@ export function createLinkToken(input: {
   products: OpenBankingProduct[];
   countryCodes: string[];
 }): LinkToken {
-  const token = `link-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+  const token = `link-${randomToken(12)}`;
   return {
     linkToken: token,
     expiration: new Date(Date.now() + 30 * 60_000).toISOString(),
@@ -121,12 +122,12 @@ export function exchangePublicToken(publicToken: string, institutionId: string):
   return {
     itemId: `item_${Date.now()}`,
     institutionId: inst.id,
-    accessTokenRef: `access-ref_${Math.random().toString(36).slice(2, 10)}`,
+    accessTokenRef: `access-ref_${randomToken(9)}`,
     status: "good",
     createdAt: new Date().toISOString(),
     accounts: [
       {
-        accountId: `acc_${Math.random().toString(36).slice(2, 8)}`,
+        accountId: `acc_${randomToken(6)}`,
         name: `${inst.name} · Current`,
         mask: "4821",
         type: "depository",
@@ -134,7 +135,7 @@ export function exchangePublicToken(publicToken: string, institutionId: string):
         balances: { available: 12500.5, current: 12840.0 },
       },
       {
-        accountId: `acc_${Math.random().toString(36).slice(2, 8)}`,
+        accountId: `acc_${randomToken(6)}`,
         name: `${inst.name} · Savings`,
         mask: "1190",
         type: "depository",
