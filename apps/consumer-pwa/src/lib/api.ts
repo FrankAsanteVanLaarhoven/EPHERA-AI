@@ -185,6 +185,9 @@ export async function sendTransfer(body: {
         toExternalRef: prepared.toExternalRef,
         rail: prepared.rail,
         authorisationRef: grant,
+        // Proof that this transfer went through prepare, where compliance was
+        // consulted. The server refuses a submit without a matching token.
+        approvalToken: prepared.approvalToken,
         idempotencyKey: prepared.idempotencyKey,
       }),
     });

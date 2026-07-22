@@ -18,10 +18,11 @@ import (
 )
 
 type server struct {
-	tc         client.Client
-	ledger     *ledgerclient.Client
-	compliance *compliance.Client
-	flags      *flags.Client
+	tc            client.Client
+	ledger        *ledgerclient.Client
+	compliance    *compliance.Client
+	flags         *flags.Client
+	prepareSecret []byte
 }
 
 type quoteRequest struct {
@@ -40,6 +41,7 @@ type transferRequest struct {
 	Rail             string `json:"rail"`
 	TransferID       string `json:"transferId"`
 	AuthorisationRef string `json:"authorisationRef"`
+	ApprovalToken    string `json:"approvalToken"`
 	IdempotencyKey   string `json:"idempotencyKey"`
 	FailMode         string `json:"failMode,omitempty"`
 }
@@ -56,10 +58,11 @@ func main() {
 	defer tc.Close()
 
 	s := &server{
-		tc:         tc,
-		ledger:     ledgerclient.New(ledgerURL),
-		compliance: compliance.New(env("COMPLIANCE_URL", "http://localhost:8095")),
-		flags:      flags.New(env("CONTROL_URL", "http://localhost:8094")),
+		tc:            tc,
+		ledger:        ledgerclient.New(ledgerURL),
+		compliance:    compliance.New(env("COMPLIANCE_URL", "http://localhost:8095")),
+		flags:         flags.New(env("CONTROL_URL", "http://localhost:8094")),
+		prepareSecret: loadPrepareSecret(),
 	}
 	// The orchestrator must know whether sends are stopped even when no human
 	// is logged in — which is exactly the situation a kill switch exists for.
@@ -242,11 +245,11 @@ func (s *server) prepareTransfer(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusAccepted
 		}
 		writeJSON(w, status, map[string]any{
-			"error":    "compliance_" + decision.Outcome,
-			"outcome":  decision.Outcome,
-			"reasons":  decision.Reasons,
-			"tier":     decision.Tier,
-			"message":  complianceMessage(decision.Outcome),
+			"error":   "compliance_" + decision.Outcome,
+			"outcome": decision.Outcome,
+			"reasons": decision.Reasons,
+			"tier":    decision.Tier,
+			"message": complianceMessage(decision.Outcome),
 		})
 		return
 	}
@@ -273,7 +276,9 @@ func (s *server) prepareTransfer(w http.ResponseWriter, r *http.Request) {
 		"currency":        prepared.Currency,
 		"rail":            prepared.Rail,
 		"requiresGrant":   true,
-		"message":         "Obtain an authorisation grant bound to these exact values, then submit the transfer.",
+		"approvalToken": approvalToken(s.prepareSecret, prepared.TransferID,
+			prepared.FromExternalRef, prepared.AmountMinor, prepared.Currency),
+		"message": "Obtain an authorisation grant bound to these exact values, then submit the transfer.",
 	})
 }
 
@@ -368,6 +373,19 @@ func (s *server) transfer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error":   "prepare_required",
 			"message": "transferId is required. Call POST /v1/transfers/prepare first.",
+		})
+		return
+	}
+	// The transfer must carry the approval token prepare issued, so a client
+	// cannot skip prepare — and the compliance decision taken there — by minting
+	// its own transfer id and grant. The token is bound to the transfer's
+	// identity, so it cannot be moved to a different amount or payer.
+	if !validApprovalToken(s.prepareSecret, req.ApprovalToken, req.TransferID,
+		req.FromExternalRef, req.AmountMinor, req.Currency) {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "prepare_required",
+			"message": "This transfer was not prepared, or its details changed since it was. " +
+				"Call POST /v1/transfers/prepare and submit the transfer it returns.",
 		})
 		return
 	}
