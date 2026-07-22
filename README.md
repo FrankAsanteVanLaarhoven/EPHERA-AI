@@ -30,7 +30,14 @@
 
 ## Description
 
-**EPHERA Money** is an enterprise-grade, voice-native mobile-money and financial-access platform. Users state intent in natural language; the system compiles a precise financial instrument, shows cost and consequence, requires cryptographic authorisation, and posts only through an independent double-entry ledger.
+**EPHERA Money** is a voice-native mobile-money and financial-access platform for the UK–Ghana corridor. A user states what they need, the system compiles a precise financial instrument, shows the cost and the consequence, and money moves only after a device-bound passkey signs an assertion over that exact transfer — verified by the ledger itself, consumed once, and recorded as evidence.
+
+Sandbox only. No live funds, production credentials or real customer data.
+
+**Every security claim in this document is checkable.** Run
+[`./scripts/verify-trust-claims.sh`](scripts/verify-trust-claims.sh); it exits
+non-zero if a claim fails, and prints what it does *not* verify.
+See [`docs/TRUST.md`](docs/TRUST.md).
 
 > People should not have to understand banking applications, payment rails, or menu structures. They should state what they need, see the exact cost and consequence, approve it securely, and receive proof that it happened.
 
@@ -176,14 +183,24 @@ docs/               Product, brand, threat model, runbooks, README assets
 
 ## Security & trust model
 
-| Control | Implementation direction |
-| --- | --- |
-| Authorisation | Passkey / device-bound cryptographic consent for money movement |
-| Freeze | Instant wallet freeze + passkey-gated unfreeze |
-| Ledger isolation | Balances only from ledger service — never from UI cache alone |
-| Voice boundary | Intent compilation only; no fund release from the speech model |
-| Evidence | Transfer proofs and operational audit trails (sandbox → production) |
-| PWA posture | Installable convenience surface — not the long-term custodial security root |
+Each control below is verified by a test you can run. The column says what is
+actually true today, not what is intended.
+
+| Control | State | Verified by |
+| --- | --- | --- |
+| Authorisation | A signed, transaction-bound, single-use grant the ledger verifies itself, offline | `services/authgrant`, `services/ledger` |
+| Passkeys | WebAuthn assertion over the transfer's binding digest; demonstrated in a browser | `services/identity-access` |
+| Ledger invariants | Double entry, balance floors and amount validity enforced in the database | `services/ledger` + schema triggers |
+| Operator access | Passkey only, no password anywhere; maker-checker enforced in code and schema | `services/platform-control-bff` |
+| Audit | Append-only and hash-chained; `UPDATE`/`DELETE` refused by trigger | control-plane tests |
+| Compliance | A customer cannot decide their own tier; limits enforced before authorisation | `services/compliance-risk` |
+| Kill switch | Stops payments, and stays stopped if the control plane is unreachable | `services/payments/internal/flags` |
+| Voice boundary | Intent compilation only. The intent service holds no credential for, and no route to, the ledger | ADR 0004 |
+| Mobile passkeys | **Not yet.** Needs an Expo development build; the app cannot authorise a payment today | — |
+
+What is deliberately **not** claimed — unmeasured fraud accuracy, a fixture
+screening list, shared-token service authentication, no third-party audit — is
+listed in [`docs/TRUST.md`](docs/TRUST.md#not-claimed).
 
 See also: [`docs/threat-model/`](docs/threat-model/) · [`docs/brand/SYSTEM.md`](docs/brand/SYSTEM.md)
 
@@ -236,7 +253,11 @@ curl -s -X POST localhost:8091/v1/compile -H 'content-type: application/json' \
   -d '{"text":"Send 50 cedis to Ama"}'
 
 curl -s -X POST localhost:8090/v1/transfers -H 'content-type: application/json' \
-  -d '{"amountMinor":5000,"currency":"GHS","recipientName":"Ama","authorisationRef":"passkey_demo_12345678"}'
+  -d '{"amountMinor":5000,"currency":"GHS","recipientName":"Ama"}'
+
+# The response says a grant is required. Obtain one from identity-access bound
+# to the prepared transfer, then submit it — a fabricated reference is refused.
+# See docs/runbooks/local-dev.md for the three-step flow.
 ```
 
 Without `authorisationRef`, the API returns `401 authorisation_required`.

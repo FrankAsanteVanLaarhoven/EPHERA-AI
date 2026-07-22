@@ -261,6 +261,23 @@ jobs:
         working-directory: services/payments
         run: go test ./...
 
+  trust-script:
+    name: trust verification script is runnable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: bash -n scripts/verify-trust-claims.sh
+      - name: It reports rather than silently passing without infrastructure
+        run: |
+          # With no database it must SKIP the database-backed claims, not pass
+          # them. A verification script that reports success for things it never
+          # ran would be the defect it exists to catch.
+          out=$(./scripts/verify-trust-claims.sh || true)
+          echo "$out"
+          echo "$out" | grep -q "SKIP" || { echo "expected skips with no database"; exit 1; }
+          echo "$out" | grep -q "does NOT verify" || { echo "missing the non-claims section"; exit 1; }
+
   voice-intent:
     name: voice-intent
     runs-on: ubuntu-latest

@@ -17,6 +17,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present && npm run test:financial-core",
+    "verify": "./scripts/verify-trust-claims.sh",
     "test:financial-core": "cd native/financial-core && cargo test",
     "test:ledger": "cd services/ledger && go test ./...",
     "lint": "npm run lint --workspaces --if-present",
