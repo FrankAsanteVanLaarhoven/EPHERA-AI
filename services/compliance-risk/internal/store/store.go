@@ -11,6 +11,7 @@ import (
 
 	"github.com/ephera/compliance-risk/internal/monitoring"
 	"github.com/ephera/compliance-risk/internal/risk"
+	"github.com/ephera/compliance-risk/internal/screening"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -84,25 +85,53 @@ func (s *Store) Tier(ctx context.Context, name string) (risk.Tier, error) {
 // go through SetTierWithEvidence, which requires the evidence to exist and be
 // verified first.
 
-// Screen matches a name against the screening list.
+// Screen matches a name against the screening list, fuzzily.
+//
+// The whole list is loaded and scored in Go rather than compared with an exact
+// SQL equality, so a plural, a typo, an added initial or reordered words do not
+// evade a sanctions match (they used to). This is fine for the fixture; a
+// licensed list is large enough that a real deployment implements
+// screening.Screener with an indexed provider instead, which is the point of the
+// interface. A screening error is returned, not swallowed: the caller fails the
+// decision closed rather than treating "could not screen" as "clean".
 func (s *Store) Screen(ctx context.Context, name string) ([]risk.ScreeningHit, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT normalised_name, category, source FROM screening_list WHERE normalised_name = $1
-	`, risk.NormaliseName(name))
+	rows, err := s.pool.Query(ctx,
+		`SELECT normalised_name, category, source FROM screening_list`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	hits := []risk.ScreeningHit{}
+	var entries []screening.Entry
 	for rows.Next() {
-		var h risk.ScreeningHit
-		if err := rows.Scan(&h.Name, &h.Category, &h.Source); err != nil {
+		var name, cat, src string
+		if err := rows.Scan(&name, &cat, &src); err != nil {
 			return nil, err
 		}
-		hits = append(hits, h)
+		entries = append(entries, screening.Entry{
+			Name: name, Category: screening.Category(cat), Source: src,
+		})
 	}
-	return hits, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	th := screening.DefaultThresholds()
+	matches, err := screening.NewFuzzyScreener(entries, th).Screen(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	hits := make([]risk.ScreeningHit, 0, len(matches))
+	for _, m := range matches {
+		hits = append(hits, risk.ScreeningHit{
+			Category: string(m.Category),
+			Name:     m.Name,
+			Source:   m.Source,
+			Score:    m.Score,
+			Strong:   th.IsStrong(m.Score),
+		})
+	}
+	return hits, nil
 }
 
 // querier is the subset of pgx satisfied by both the pool and a transaction, so

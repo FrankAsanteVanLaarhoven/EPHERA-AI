@@ -59,6 +59,12 @@ type ScreeningHit struct {
 	Category string // sanctions | pep | adverse_media
 	Name     string
 	Source   string
+	// Score is the match similarity, 0..1. Strong is whether it cleared the
+	// "near-certain" threshold. A strong sanctions match denies; a weaker one
+	// holds for review, because fuzzy matching produces false positives and
+	// auto-denying a possibly-innocent customer is its own harm.
+	Score  float64
+	Strong bool
 }
 
 type Decision struct {
@@ -93,7 +99,15 @@ func Evaluate(in Input) Decision {
 	for _, hit := range in.ScreeningHits {
 		switch hit.Category {
 		case "sanctions":
-			escalate(Deny, "sanctions_match:"+hit.Name)
+			if hit.Strong {
+				escalate(Deny, "sanctions_match:"+hit.Name)
+			} else {
+				// A plausible but not near-certain resemblance to a sanctioned
+				// name. Hold for a human rather than auto-denying: fuzzy matching
+				// produces false positives, and blocking a real customer on a
+				// coincidence is its own harm.
+				escalate(Review, "possible_sanctions_match:"+hit.Name)
+			}
 		case "pep":
 			// Being a politically exposed person is not wrongdoing. It calls for
 			// a look, not a refusal.

@@ -103,7 +103,7 @@ func TestNewRecipientGoesToReviewNotDenial(t *testing.T) {
 func TestSanctionsMatchDenies(t *testing.T) {
 	d := Evaluate(base(Input{
 		AmountMinor: 1_000, KnownRecipient: true,
-		ScreeningHits: []ScreeningHit{{Category: "sanctions", Name: "fictional sanctioned person"}},
+		ScreeningHits: []ScreeningHit{{Category: "sanctions", Name: "fictional sanctioned person", Strong: true}},
 	}))
 	if d.Outcome != Deny || !hasReason(d, "sanctions_match") {
 		t.Fatalf("outcome %s, reasons %v", d.Outcome, d.Reasons)
@@ -182,5 +182,27 @@ func TestNameNormalisation(t *testing.T) {
 		if got := NormaliseName(in); got != want {
 			t.Fatalf("NormaliseName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A near-certain sanctions match denies; a weaker resemblance holds for review
+// rather than auto-denying a possibly-innocent customer.
+func TestStrongSanctionsDeniesWeakReviews(t *testing.T) {
+	base := Input{
+		CustomerStatus: "active",
+		Tier:           Tier{Rank: 3, SingleLimitMinor: 1_000_000, DailyLimitMinor: 5_000_000, NewRecipientLimitMinor: 1_000_000},
+		AmountMinor:    10_000, Currency: "GHS", RecipientName: "x",
+	}
+
+	strong := base
+	strong.ScreeningHits = []ScreeningHit{{Category: "sanctions", Name: "Fictional Sanctioned Person", Score: 1.0, Strong: true}}
+	if d := Evaluate(strong); d.Outcome != Deny {
+		t.Fatalf("a strong sanctions match did not deny: %s", d.Outcome)
+	}
+
+	weak := base
+	weak.ScreeningHits = []ScreeningHit{{Category: "sanctions", Name: "Fictitious Sanctioned Person", Score: 0.83, Strong: false}}
+	if d := Evaluate(weak); d.Outcome != Review {
+		t.Fatalf("a weak sanctions match did not hold for review: %s", d.Outcome)
 	}
 }

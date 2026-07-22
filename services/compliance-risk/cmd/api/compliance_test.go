@@ -645,12 +645,16 @@ func TestDecideSurfacesRareSituationAdvisory(t *testing.T) {
 	// Enable awareness on the running server and seed enough ordinary payments
 	// that it can make a confident claim.
 	h.s.awareness = detect.NewAwareness(detect.NewPopulation(), 12, 15*time.Minute, 3)
+	// Seed both hour bands so the wall-clock hour of the test run cannot make an
+	// ordinary payment look rare.
 	for i := 0; i < 600; i++ {
-		h.s.awareness.Assess(detect.Observation{Features: []detect.Feature{
-			{Name: "amount_band", Value: "small"},
-			{Name: "payee_type", Value: "known"},
-			{Name: "hour_band", Value: "day"},
-		}})
+		for _, hour := range []string{"day", "night"} {
+			h.s.awareness.Assess(detect.Observation{Features: []detect.Feature{
+				{Name: "amount_band", Value: "small"},
+				{Name: "payee_type", Value: "known"},
+				{Name: "hour_band", Value: hour},
+			}})
+		}
 	}
 	h.verify(t, "verified")
 
@@ -679,12 +683,16 @@ func TestDecideSurfacesRareSituationAdvisory(t *testing.T) {
 func TestOrdinaryPaymentCarriesNoSituation(t *testing.T) {
 	h := newHarness(t)
 	h.s.awareness = detect.NewAwareness(detect.NewPopulation(), 12, 15*time.Minute, 3)
+	// Seed both hour bands so the wall-clock hour of the test run cannot make an
+	// ordinary payment look rare.
 	for i := 0; i < 600; i++ {
-		h.s.awareness.Assess(detect.Observation{Features: []detect.Feature{
-			{Name: "amount_band", Value: "small"},
-			{Name: "payee_type", Value: "known"},
-			{Name: "hour_band", Value: "day"},
-		}})
+		for _, hour := range []string{"day", "night"} {
+			h.s.awareness.Assess(detect.Observation{Features: []detect.Feature{
+				{Name: "amount_band", Value: "small"},
+				{Name: "payee_type", Value: "known"},
+				{Name: "hour_band", Value: hour},
+			}})
+		}
 	}
 	h.verify(t, "verified")
 	// Establish the recipient, then a small ordinary payment to them.

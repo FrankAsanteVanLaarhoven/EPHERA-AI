@@ -65,6 +65,10 @@ CREATE TABLE screening_list (
 
 CREATE INDEX screening_list_name_idx ON screening_list (normalised_name);
 
+-- A fixture, not a licensed list. It is matched FUZZILY (see internal/screening):
+-- a plural, typo, added initial or reordered name is caught, not just an exact
+-- string. A real deployment implements screening.Screener against a licensed
+-- feed (OFAC / HM Treasury / UN / a PEP provider).
 INSERT INTO screening_list (normalised_name, category, source) VALUES
     ('fictional sanctioned person', 'sanctions', 'SANDBOX-FIXTURE'),
     ('example blocked entity',      'sanctions', 'SANDBOX-FIXTURE'),
