@@ -55,10 +55,15 @@ export class PaymentsClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req),
     });
-    const data = (await res.json()) as TransferResponse;
-    if (!res.ok && !data.status) {
+    const data = (await res.json().catch(() => ({}))) as Partial<TransferResponse>;
+    // A non-OK response is a failure, full stop. The previous check returned it
+    // as success whenever the body carried any `status` field, so a refused or
+    // errored transfer that happened to include a status was surfaced to the UI
+    // as if it had gone through. The server signals a real outcome with a 2xx
+    // and a status; anything else throws with the error detail.
+    if (!res.ok) {
       throw new Error(data.error ?? `transfer failed: ${res.status}`);
     }
-    return data;
+    return data as TransferResponse;
   }
 }
