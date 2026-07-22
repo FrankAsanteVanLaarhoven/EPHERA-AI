@@ -218,7 +218,7 @@ export default function SendScreen({
             payload: body,
             authorisationRef: grant,
           });
-          setStatus(data.error ?? "Queued offline as pending.");
+          setStatus(data.error ?? "The transfer was not sent — try again when you are back online.");
           setStep("done");
           return;
         }
@@ -243,7 +243,7 @@ export default function SendScreen({
           payload: body,
           authorisationRef: grant,
         });
-        setStatus("Network unavailable — authorised transfer queued offline.");
+        setStatus("Network unavailable — the transfer was not sent. Try again when you are back online.");
         setStep("done");
       }
     } finally {

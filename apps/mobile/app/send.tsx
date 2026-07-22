@@ -132,7 +132,7 @@ export default function SendScreen() {
             authorisationRef: auth.authorisationRef,
           });
           setStatus(
-            `Could not complete online (${data.error ?? res.status}). Queued offline as pending until revalidated.`,
+            `Could not complete (${data.error ?? res.status}). The transfer was not sent — try again when you are back online.`,
           );
           return;
         }
@@ -154,7 +154,7 @@ export default function SendScreen() {
           payload: body,
           authorisationRef: auth.authorisationRef,
         });
-        setStatus("Network unavailable. Authorised transfer queued offline (pending, not settled).");
+        setStatus("Network unavailable. The transfer was not sent — try again when you are back online.");
       }
     } finally {
       setBusy(false);
