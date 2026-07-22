@@ -3,8 +3,9 @@
 **Scope:** customer verification, the limits that follow from it, screening, and
 review cases — owned by a service instead of a device.
 **Exit condition (programme):** end-to-end compliance sandbox.
-**Verdict:** PASS WITH LIMITATIONS — the foundation exists and is enforced in
-the payment path; document capture and KYB/KYA do not exist. See section 9.
+**Verdict:** PASS WITH LIMITATIONS — verification, limits and screening are
+enforced; KYB and KYA exist and evidence is real. Behavioural monitoring and an
+analyst console do not. See section 9.
 
 ## 1. Evidence and assumptions
 
@@ -47,7 +48,7 @@ subject can write.
 
 | Command | Result |
 | --- | --- |
-| `go test ./...` in `services/compliance-risk` | ok — 21 tests |
+| `go test ./...` in `services/compliance-risk` | ok — 27 tests |
 | `go test ./...` in `services/payments` | ok |
 | Every other service, Rust, Python, connect-layer | ok |
 
@@ -75,10 +76,14 @@ route's real method.
 
 ## 6. Mitigations and residual risks
 
-- **No document capture.** A tier decision cites an evidence reference; nothing
-  stores or verifies the document behind it. Evidence storage is G7.
-- **KYB and KYA do not exist.** This is customer verification only. Businesses
-  and agents have no model here.
+- **Document bytes are not stored.** A document record carries a content hash,
+  so a document produced later can be shown to be the one verified, but the
+  bytes belong in object storage — that is G7. What is closed is the gap that
+  mattered: a tier can no longer be raised on evidence nobody has verified.
+- **KYB and KYA exist as verification, not as full products.** Businesses and
+  agents have subject types, their own tiers, and their own evidence
+  requirements. Agent float is a limit, not a managed float ledger; beneficial
+  ownership is a verified document, not a modelled ownership graph.
 - **Screening is a sandbox fixture.** Three fictional entries, matched by
   case-folded exact comparison. Real screening consumes a licensed list with
   fuzzy matching, and the service says so in its own health response rather than
@@ -117,6 +122,15 @@ displayed on a device, a screened name is refused, and a held payment raises a
 case. The payment orchestrator asks before the customer authorises anything, and
 treats an unreachable compliance service as a refusal.
 
-It is not an end-to-end compliance sandbox yet. There is no document capture, no
-KYB or KYA, no behavioural monitoring, and no console for analysts to work
-cases. Those are the rest of G3.
+KYB and KYA followed, along with the thing that made the first pass weaker than
+it looked: a tier decision cited an `evidence_ref` that was a free string, so a
+verification could be recorded against evidence nobody had ever seen. A tier now
+requires verified, unexpired documents of the kinds that tier demands — which
+kinds is data in `tier_requirements`, so changing a requirement is a migration
+with a record rather than a recompiled constant. A subject cannot verify their
+own document, and tiers do not cross subject types: a business cannot be given a
+person's tier.
+
+It is still not an end-to-end compliance sandbox. There is no behavioural
+monitoring, no console for analysts to work cases, and the document bytes are
+not stored. Those are the rest of G3 and G7.

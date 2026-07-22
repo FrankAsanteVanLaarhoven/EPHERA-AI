@@ -79,11 +79,21 @@ func (h *harness) decide(t *testing.T, amount int64, recipient string) map[strin
 	return body
 }
 
+// verify raises the subject to a tier, supplying and verifying whatever evidence
+// that tier requires. Since G3-B a tier cannot be raised on evidence nobody has
+// verified, so the helper has to produce it.
 func (h *harness) verify(t *testing.T, tier string) {
 	t.Helper()
+	code, req := h.call(t, "GET", "/v1/subjects/"+h.subject+"/requirements?tier="+tier, nil, true)
+	if code != http.StatusOK {
+		t.Fatalf("requirements: %d %v", code, req)
+	}
+	for _, kind := range req["missingEvidence"].([]any) {
+		h.evidence(t, h.subject, kind.(string))
+	}
 	code, body := h.call(t, "POST", "/v1/customers/"+h.subject+"/tier", map[string]any{
 		"tier": tier, "decidedBy": "compliance.officer@ephera.internal",
-		"evidenceRef": "doc_fixture_1", "reason": "identity document verified",
+		"reason": "evidence verified",
 	}, true)
 	if code != http.StatusOK {
 		t.Fatalf("set tier: %d %v", code, body)
@@ -248,5 +258,192 @@ func TestTierDecisionRequiresEvidenceAndReason(t *testing.T) {
 	}, true)
 	if code == http.StatusOK {
 		t.Fatal("a tier was set with no evidence reference or reason")
+	}
+}
+
+// --- KYB, KYA and evidence ---
+
+func (h *harness) subjectOfType(t *testing.T, kind string) string {
+	t.Helper()
+	subject := fmt.Sprintf("test:%s:%d", kind, time.Now().UnixNano())
+	code, body := h.call(t, "POST", "/v1/subjects", map[string]any{
+		"subject": subject, "subjectType": kind, "legalName": "Fixture " + kind,
+	}, true)
+	if code != http.StatusOK {
+		t.Fatalf("create %s: %d %v", kind, code, body)
+	}
+	return subject
+}
+
+// evidence submits a document and has a reviewer verify it.
+func (h *harness) evidence(t *testing.T, subject, kind string) string {
+	t.Helper()
+	code, doc := h.call(t, "POST", "/v1/subjects/"+subject+"/documents", map[string]any{
+		"kind": kind, "contentHash": fmt.Sprintf("sha256:%s:%d", kind, time.Now().UnixNano()),
+	}, true)
+	if code != http.StatusCreated {
+		t.Fatalf("submit %s: %d %v", kind, code, doc)
+	}
+	id := doc["id"].(string)
+	code, out := h.call(t, "POST", "/v1/documents/"+id+"/review", map[string]any{
+		"status": "verified", "reviewedBy": "compliance.officer@ephera.internal", "note": "checked",
+	}, true)
+	if code != http.StatusOK {
+		t.Fatalf("review %s: %d %v", kind, code, out)
+	}
+	return id
+}
+
+// A tier cannot be raised on evidence nobody has verified. The previous version
+// accepted any string as an evidence reference.
+func TestTierRequiresVerifiedEvidence(t *testing.T) {
+	h := newHarness(t)
+	subject := h.subjectOfType(t, "person")
+
+	code, body := h.call(t, "POST", "/v1/customers/"+subject+"/tier", map[string]any{
+		"tier": "verified", "decidedBy": "compliance.officer@ephera.internal",
+		"reason": "no evidence at all",
+	}, true)
+	if code != http.StatusConflict {
+		t.Fatalf("tier without evidence returned %d %v, expected 409", code, body)
+	}
+
+	h.evidence(t, subject, "government_id")
+	code, body = h.call(t, "POST", "/v1/customers/"+subject+"/tier", map[string]any{
+		"tier": "verified", "decidedBy": "compliance.officer@ephera.internal",
+		"reason": "identity document verified",
+	}, true)
+	if code != http.StatusOK {
+		t.Fatalf("tier with evidence: %d %v", code, body)
+	}
+	if body["tier"] != "verified" {
+		t.Fatalf("tier is %v", body["tier"])
+	}
+}
+
+// A document cannot be verified by the subject it describes.
+func TestSubjectCannotVerifyTheirOwnDocument(t *testing.T) {
+	h := newHarness(t)
+	subject := h.subjectOfType(t, "person")
+
+	code, doc := h.call(t, "POST", "/v1/subjects/"+subject+"/documents", map[string]any{
+		"kind": "government_id", "contentHash": "sha256:self",
+	}, true)
+	if code != http.StatusCreated {
+		t.Fatalf("submit: %d %v", code, doc)
+	}
+	code, body := h.call(t, "POST", "/v1/documents/"+doc["id"].(string)+"/review", map[string]any{
+		"status": "verified", "reviewedBy": subject,
+	}, true)
+	if code != http.StatusForbidden {
+		t.Fatalf("self-review returned %d %v, expected 403", code, body)
+	}
+}
+
+// A document with no content hash is not evidence.
+func TestDocumentRequiresAContentHash(t *testing.T) {
+	h := newHarness(t)
+	subject := h.subjectOfType(t, "person")
+	code, _ := h.call(t, "POST", "/v1/subjects/"+subject+"/documents", map[string]any{
+		"kind": "government_id",
+	}, true)
+	if code == http.StatusCreated {
+		t.Fatal("a document was accepted with no content hash")
+	}
+}
+
+// KYB: a business needs registration and the people behind it, and its verified
+// tier is not the same thing as a person's.
+func TestBusinessVerificationRequiresOwnershipEvidence(t *testing.T) {
+	h := newHarness(t)
+	subject := h.subjectOfType(t, "business")
+
+	h.evidence(t, subject, "certificate_of_incorporation")
+	// Registered is reachable on incorporation alone.
+	code, body := h.call(t, "POST", "/v1/customers/"+subject+"/tier", map[string]any{
+		"tier": "registered", "decidedBy": "compliance.officer@ephera.internal",
+		"reason": "registration verified",
+	}, true)
+	if code != http.StatusOK {
+		t.Fatalf("registered: %d %v", code, body)
+	}
+
+	// Verified additionally needs beneficial ownership and a director identity.
+	code, body = h.call(t, "POST", "/v1/customers/"+subject+"/tier", map[string]any{
+		"tier": "verified", "decidedBy": "compliance.officer@ephera.internal",
+		"reason": "premature",
+	}, true)
+	if code != http.StatusConflict {
+		t.Fatalf("business verified without ownership evidence returned %d %v", code, body)
+	}
+
+	code, out := h.call(t, "GET", "/v1/subjects/"+subject+"/requirements?tier=verified", nil, true)
+	if code != http.StatusOK {
+		t.Fatalf("requirements: %d %v", code, out)
+	}
+	missing := out["missingEvidence"].([]any)
+	if len(missing) != 2 {
+		t.Fatalf("expected two outstanding documents, got %v", missing)
+	}
+
+	h.evidence(t, subject, "beneficial_ownership")
+	h.evidence(t, subject, "director_identity")
+	code, body = h.call(t, "POST", "/v1/customers/"+subject+"/tier", map[string]any{
+		"tier": "verified", "decidedBy": "compliance.officer@ephera.internal",
+		"reason": "ownership and directors verified",
+	}, true)
+	if code != http.StatusOK {
+		t.Fatalf("business verified: %d %v", code, body)
+	}
+	if body["subjectType"] != "business" {
+		t.Fatalf("subject type is %v", body["subjectType"])
+	}
+}
+
+// KYA: an agent needs identity, a bound device, and a float agreement.
+func TestAgentVerificationRequiresDeviceAndFloatAgreement(t *testing.T) {
+	h := newHarness(t)
+	subject := h.subjectOfType(t, "agent")
+
+	h.evidence(t, subject, "government_id")
+	code, out := h.call(t, "GET", "/v1/subjects/"+subject+"/requirements?tier=provisional", nil, true)
+	if code != http.StatusOK {
+		t.Fatalf("requirements: %d %v", code, out)
+	}
+	if out["eligible"] != false {
+		t.Fatalf("agent eligible without a device attestation: %v", out)
+	}
+
+	h.evidence(t, subject, "device_attestation")
+	code, body := h.call(t, "POST", "/v1/customers/"+subject+"/tier", map[string]any{
+		"tier": "provisional", "decidedBy": "compliance.officer@ephera.internal",
+		"reason": "identity and device verified",
+	}, true)
+	if code != http.StatusOK {
+		t.Fatalf("agent provisional: %d %v", code, body)
+	}
+
+	// Full verification additionally needs the float agreement.
+	code, _ = h.call(t, "POST", "/v1/customers/"+subject+"/tier", map[string]any{
+		"tier": "verified", "decidedBy": "compliance.officer@ephera.internal",
+		"reason": "premature",
+	}, true)
+	if code != http.StatusConflict {
+		t.Fatalf("agent verified without a float agreement returned %d", code)
+	}
+}
+
+// A tier belongs to a subject type: a business cannot be given a person's tier.
+func TestTiersDoNotCrossSubjectTypes(t *testing.T) {
+	h := newHarness(t)
+	subject := h.subjectOfType(t, "business")
+	h.evidence(t, subject, "certificate_of_incorporation")
+
+	code, _ := h.call(t, "POST", "/v1/customers/"+subject+"/tier", map[string]any{
+		"tier": "premium", // a person tier
+		"decidedBy": "compliance.officer@ephera.internal", "reason": "wrong type",
+	}, true)
+	if code == http.StatusOK {
+		t.Fatal("a business was given a person's tier")
 	}
 }

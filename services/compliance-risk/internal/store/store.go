@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"errors"
 	"time"
 
@@ -37,10 +38,11 @@ func (s *Store) Close()                 { s.pool.Close() }
 func (s *Store) Pool() *pgxpool.Pool    { return s.pool }
 
 type Customer struct {
-	Subject string    `json:"subject"`
-	Tier    string    `json:"tier"`
-	Status  string    `json:"status"`
-	Limits  risk.Tier `json:"limits"`
+	Subject     string    `json:"subject"`
+	SubjectType string    `json:"subjectType"`
+	Tier        string    `json:"tier"`
+	Status      string    `json:"status"`
+	Limits      risk.Tier `json:"limits"`
 }
 
 // EnsureCustomer returns the customer, creating them unverified on first sight.
@@ -50,12 +52,12 @@ func (s *Store) EnsureCustomer(ctx context.Context, subject string) (Customer, e
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO customers (subject) VALUES ($1)
 		ON CONFLICT (subject) DO UPDATE SET subject = EXCLUDED.subject
-		RETURNING subject, tier, status
-	`, subject).Scan(&c.Subject, &c.Tier, &c.Status)
+		RETURNING subject, tier, status, subject_type
+	`, subject).Scan(&c.Subject, &c.Tier, &c.Status, &c.SubjectType)
 	if err != nil {
 		return Customer{}, err
 	}
-	c.Limits, err = s.Tier(ctx, c.Tier)
+	c.Limits, err = s.TierFor(ctx, c.SubjectType, c.Tier)
 	return c, err
 }
 
@@ -236,4 +238,209 @@ func (s *Store) ListOpenCases(ctx context.Context, limit int) ([]Case, error) {
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// --- KYB, KYA and evidence ---
+
+var (
+	ErrEvidenceMissing    = errors.New("the evidence this tier requires has not been verified")
+	ErrSelfReview         = errors.New("a document cannot be verified by its subject")
+	ErrDocumentNotFound   = errors.New("document not found")
+)
+
+type Document struct {
+	ID          string     `json:"id"`
+	Subject     string     `json:"subject"`
+	Kind        string     `json:"kind"`
+	ContentHash string     `json:"contentHash"`
+	Status      string     `json:"status"`
+	ReviewedBy  *string    `json:"reviewedBy,omitempty"`
+	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
+}
+
+// EnsureSubject creates a subject of a given kind on first sight.
+func (s *Store) EnsureSubject(ctx context.Context, subject, subjectType, legalName string) (Customer, error) {
+	if subjectType == "" {
+		subjectType = "person"
+	}
+	var c Customer
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO customers (subject, subject_type, legal_name) VALUES ($1,$2,$3)
+		ON CONFLICT (subject) DO UPDATE SET legal_name = COALESCE(EXCLUDED.legal_name, customers.legal_name)
+		RETURNING subject, tier, status, subject_type
+	`, subject, subjectType, nullIfEmpty(legalName)).Scan(&c.Subject, &c.Tier, &c.Status, &c.SubjectType)
+	if err != nil {
+		return Customer{}, err
+	}
+	c.Limits, err = s.TierFor(ctx, c.SubjectType, c.Tier)
+	return c, err
+}
+
+func nullIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// TierFor reads the limits for a tier of a given subject type. A verified
+// business is not a verified person, so the type is part of the key.
+func (s *Store) TierFor(ctx context.Context, subjectType, name string) (risk.Tier, error) {
+	var t risk.Tier
+	err := s.pool.QueryRow(ctx, `
+		SELECT tier, rank, daily_limit_minor, single_limit_minor, new_recipient_limit_minor
+		FROM kyc_tiers WHERE subject_type = $1 AND tier = $2
+	`, subjectType, name).Scan(&t.Name, &t.Rank, &t.DailyLimitMinor, &t.SingleLimitMinor, &t.NewRecipientLimitMinor)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return risk.Tier{}, ErrUnknownTier
+	}
+	return t, err
+}
+
+// SubmitDocument records evidence. The content hash is mandatory: a record
+// with no hash cannot later be shown to correspond to any document.
+func (s *Store) SubmitDocument(ctx context.Context, subject, kind, contentHash string) (Document, error) {
+	if contentHash == "" {
+		return Document{}, errors.New("a document requires a content hash")
+	}
+	var d Document
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO verification_documents (subject, kind, content_hash)
+		VALUES ($1,$2,$3)
+		RETURNING id, subject, kind, content_hash, status
+	`, subject, kind, contentHash).Scan(&d.ID, &d.Subject, &d.Kind, &d.ContentHash, &d.Status)
+	return d, err
+}
+
+// ReviewDocument records a reviewer's decision on evidence.
+func (s *Store) ReviewDocument(ctx context.Context, id, status, reviewedBy, note string) (Document, error) {
+	if status != "verified" && status != "rejected" {
+		return Document{}, errors.New("a document is verified or rejected")
+	}
+	var subject string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT subject FROM verification_documents WHERE id = $1`, id).Scan(&subject); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Document{}, ErrDocumentNotFound
+		}
+		return Document{}, err
+	}
+	if subject == reviewedBy {
+		return Document{}, ErrSelfReview
+	}
+
+	var d Document
+	err := s.pool.QueryRow(ctx, `
+		UPDATE verification_documents
+		SET status = $2, reviewed_by = $3, reviewed_at = now(), reviewer_note = $4
+		WHERE id = $1 AND status = 'submitted'
+		RETURNING id, subject, kind, content_hash, status, reviewed_by
+	`, id, status, reviewedBy, note).Scan(&d.ID, &d.Subject, &d.Kind, &d.ContentHash, &d.Status, &d.ReviewedBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Document{}, ErrDocumentNotFound
+	}
+	return d, err
+}
+
+// MissingEvidence returns the document kinds a tier requires that the subject
+// does not hold as verified, unexpired evidence.
+func (s *Store) MissingEvidence(ctx context.Context, subject, subjectType, tier string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT r.document_kind
+		FROM tier_requirements r
+		WHERE r.subject_type = $2 AND r.tier = $3
+		  AND NOT EXISTS (
+		      SELECT 1 FROM verification_documents d
+		      WHERE d.subject = $1
+		        AND d.kind = r.document_kind
+		        AND d.status = 'verified'
+		        AND (d.expires_at IS NULL OR d.expires_at > now())
+		  )
+		ORDER BY r.document_kind
+	`, subject, subjectType, tier)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	missing := []string{}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		missing = append(missing, k)
+	}
+	return missing, rows.Err()
+}
+
+// SetTierWithEvidence raises a tier only when the evidence it requires has been
+// verified. This is what makes a tier a statement about evidence rather than an
+// assertion: the previous version accepted any string as an evidence reference.
+func (s *Store) SetTierWithEvidence(ctx context.Context, subject, toTier, decidedBy, reason string) (Customer, error) {
+	if subject == decidedBy {
+		return Customer{}, ErrSelfVerification
+	}
+	if reason == "" {
+		return Customer{}, errors.New("a tier decision requires a reason")
+	}
+	c, err := s.EnsureSubject(ctx, subject, "", "")
+	if err != nil {
+		return Customer{}, err
+	}
+	if _, err := s.TierFor(ctx, c.SubjectType, toTier); err != nil {
+		return Customer{}, err
+	}
+	missing, err := s.MissingEvidence(ctx, subject, c.SubjectType, toTier)
+	if err != nil {
+		return Customer{}, err
+	}
+	if len(missing) > 0 {
+		return Customer{}, fmt.Errorf("%w: %v", ErrEvidenceMissing, missing)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Customer{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var from string
+	if err := tx.QueryRow(ctx,
+		`SELECT tier FROM customers WHERE subject = $1 FOR UPDATE`, subject).Scan(&from); err != nil {
+		return Customer{}, err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE customers SET tier = $2, updated_at = now() WHERE subject = $1`, subject, toTier); err != nil {
+		return Customer{}, err
+	}
+	// Cite one of the verified documents, so the decision points at evidence
+	// that exists rather than at a string somebody typed.
+	var docID *string
+	_ = tx.QueryRow(ctx, `
+		SELECT d.id::text FROM verification_documents d
+		JOIN tier_requirements r ON r.document_kind = d.kind
+		WHERE d.subject = $1 AND d.status = 'verified'
+		  AND r.subject_type = $2 AND r.tier = $3
+		LIMIT 1
+	`, subject, c.SubjectType, toTier).Scan(&docID)
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO tier_decisions
+			(subject, from_tier, to_tier, decided_by, evidence_ref, reason, evidence_document_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+	`, subject, from, toTier, decidedBy, coalesce(docID, "verified-evidence"), reason, docID); err != nil {
+		return Customer{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Customer{}, err
+	}
+	return s.EnsureSubject(ctx, subject, "", "")
+}
+
+func coalesce(p *string, fallback string) string {
+	if p != nil {
+		return *p
+	}
+	return fallback
 }

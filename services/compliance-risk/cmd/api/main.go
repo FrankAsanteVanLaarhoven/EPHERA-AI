@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -66,6 +67,10 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/decisions", s.serviceOnly(s.decide))
 	mux.HandleFunc("GET /v1/cases", s.serviceOnly(s.listCases))
 	mux.HandleFunc("POST /v1/cases/{id}/close", s.serviceOnly(s.closeCase))
+	mux.HandleFunc("POST /v1/subjects", s.serviceOnly(s.createSubject))
+	mux.HandleFunc("POST /v1/subjects/{subject}/documents", s.serviceOnly(s.submitDocument))
+	mux.HandleFunc("POST /v1/documents/{id}/review", s.serviceOnly(s.reviewDocument))
+	mux.HandleFunc("GET /v1/subjects/{subject}/requirements", s.serviceOnly(s.requirements))
 	return mux
 }
 
@@ -120,8 +125,14 @@ func (s *server) setTier(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	c, err := s.store.SetTier(r.Context(), subject, req.Tier, req.DecidedBy, req.EvidenceRef, req.Reason)
+	c, err := s.store.SetTierWithEvidence(r.Context(), subject, req.Tier, req.DecidedBy, req.Reason)
 	switch {
+	case errors.Is(err, store.ErrEvidenceMissing):
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":   "evidence_missing",
+			"message": err.Error(),
+		})
+		return
 	case err == store.ErrSelfVerification:
 		writeJSON(w, http.StatusForbidden, map[string]string{
 			"error":   "self_verification_refused",
@@ -244,6 +255,111 @@ func (s *server) closeCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": req.Status})
+}
+
+type subjectRequest struct {
+	Subject     string `json:"subject"`
+	SubjectType string `json:"subjectType"` // person | business | agent
+	LegalName   string `json:"legalName"`
+}
+
+// createSubject registers a person, business or agent. All three share the
+// verification machinery: someone other than the subject decides, on evidence.
+func (s *server) createSubject(w http.ResponseWriter, r *http.Request) {
+	var req subjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Subject == "" {
+		http.Error(w, "subject is required", http.StatusBadRequest)
+		return
+	}
+	c, err := s.store.EnsureSubject(r.Context(), req.Subject, req.SubjectType, req.LegalName)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+type documentRequest struct {
+	Kind        string `json:"kind"`
+	ContentHash string `json:"contentHash"`
+}
+
+func (s *server) submitDocument(w http.ResponseWriter, r *http.Request) {
+	var req documentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	subject := r.PathValue("subject")
+	if _, err := s.store.EnsureSubject(r.Context(), subject, "", ""); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	d, err := s.store.SubmitDocument(r.Context(), subject, req.Kind, req.ContentHash)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, d)
+}
+
+type reviewRequest struct {
+	Status     string `json:"status"` // verified | rejected
+	ReviewedBy string `json:"reviewedBy"`
+	Note       string `json:"note"`
+}
+
+func (s *server) reviewDocument(w http.ResponseWriter, r *http.Request) {
+	var req reviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.ReviewedBy == "" {
+		http.Error(w, "reviewedBy is required", http.StatusBadRequest)
+		return
+	}
+	d, err := s.store.ReviewDocument(r.Context(), r.PathValue("id"), req.Status, req.ReviewedBy, req.Note)
+	switch {
+	case err == store.ErrSelfReview:
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error":   "self_review_refused",
+			"message": "A document cannot be verified by the subject it describes.",
+		})
+		return
+	case err == store.ErrDocumentNotFound:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	case err != nil:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
+}
+
+// requirements says what evidence is still outstanding for a target tier, so a
+// subject can be told what is needed rather than simply refused.
+func (s *server) requirements(w http.ResponseWriter, r *http.Request) {
+	subject := r.PathValue("subject")
+	target := r.URL.Query().Get("tier")
+	if target == "" {
+		http.Error(w, "tier is required", http.StatusBadRequest)
+		return
+	}
+	c, err := s.store.EnsureSubject(r.Context(), subject, "", "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	missing, err := s.store.MissingEvidence(r.Context(), subject, c.SubjectType, target)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"subject": subject, "subjectType": c.SubjectType,
+		"targetTier": target, "missingEvidence": missing, "eligible": len(missing) == 0,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

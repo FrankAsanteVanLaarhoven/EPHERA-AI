@@ -71,7 +71,7 @@ Closed at G3 — see [`G3-report.md`](G3-report.md).
 
 | ID | Sev | State |
 | --- | --- | --- |
-| D-33 | S1 | **Closed.** KYC tier is owned by `compliance-risk`. A tier decision records who made it and on what evidence, and the subject of a verification can never be the decider — refused by the service and by a database constraint. The device no longer writes a tier; it submits and waits |
+| D-33 | S1 | **Closed.** KYC tier is owned by `compliance-risk`, and since G3-B a tier can only be raised on verified evidence of the kinds that tier requires — not on a free-text reference. A tier decision records who made it and on what evidence, and the subject of a verification can never be the decider — refused by the service and by a database constraint. The device no longer writes a tier; it submits and waits |
 | D-39 | S2 | **Closed.** Single-transaction, daily-velocity and new-recipient limits are enforced by the service and consulted by the payment orchestrator before the customer is asked to authorise anything. A refused attempt does not consume the limit |
 
 Closed after G4.
