@@ -19,14 +19,27 @@ import (
 // the exact transfer being authorised (ADR 0002).
 
 type registerBeginRequest struct {
-	Subject     string `json:"subject"`
-	DisplayName string `json:"displayName"`
+	Subject        string `json:"subject"`
+	DisplayName    string `json:"displayName"`
+	EnrolmentToken string `json:"enrolmentToken"`
 }
 
 func (s *server) passkeyRegisterBegin(w http.ResponseWriter, r *http.Request) {
 	var req registerBeginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Subject == "" {
 		http.Error(w, "subject is required", http.StatusBadRequest)
+		return
+	}
+	// Enrolment must be authorised before a ceremony can start. Outside the
+	// sandbox this consumes a single-use, subject-bound token, so a credential
+	// cannot be registered for a subject the caller does not control. Consuming
+	// it here (at begin) means the token authorises exactly one ceremony; the
+	// resulting challenge is itself single-use and carries through to finish.
+	if err := s.requireEnrolment(r, req.Subject, req.EnrolmentToken); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error":   "enrolment_not_authorised",
+			"message": err.Error(),
+		})
 		return
 	}
 	ctx := r.Context()
@@ -224,10 +237,10 @@ func (s *server) mintWithPasskey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"grant":         grant,
-		"method":        string(authgrant.MethodPasskey),
-		"expiresIn":     120,
-		"cloneWarning":  cred.Authenticator.CloneWarning,
+		"grant":        grant,
+		"method":       string(authgrant.MethodPasskey),
+		"expiresIn":    120,
+		"cloneWarning": cred.Authenticator.CloneWarning,
 	})
 }
 

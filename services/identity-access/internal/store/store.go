@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -212,4 +213,24 @@ func (s *Store) ConsumeChallenge(ctx context.Context, challenge string) (Challen
 		return c, err
 	}
 	return c, tx.Commit(ctx)
+}
+
+// ErrEnrolmentTokenUsed is returned when an enrolment token has already been
+// consumed. It is a distinct error so registration can report a replay clearly.
+var ErrEnrolmentTokenUsed = errors.New("enrolment token already used")
+
+// ConsumeEnrolmentToken records an enrolment token as spent, keyed by its jti.
+// The primary key makes it single-use: a second attempt with the same token
+// collides and is refused, so one token authorises exactly one registration.
+func (s *Store) ConsumeEnrolmentToken(ctx context.Context, jti, subject string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO enrolment_tokens (jti, subject) VALUES ($1, $2)`, jti, subject)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return ErrEnrolmentTokenUsed
+		}
+		return err
+	}
+	return nil
 }

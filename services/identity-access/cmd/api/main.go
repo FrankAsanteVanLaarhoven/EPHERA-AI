@@ -43,8 +43,12 @@ type server struct {
 	priv        ed25519.PrivateKey
 	pub         ed25519.PublicKey
 	sandboxMint bool
-	store       *store.Store
-	passkeys    *passkey.Service
+	// enrolmentOpen allows registering a passkey with no enrolment token.
+	// True only in a sandbox environment; production requires a token so a
+	// credential cannot be registered for a subject the caller does not control.
+	enrolmentOpen bool
+	store         *store.Store
+	passkeys      *passkey.Service
 }
 
 func main() {
@@ -84,7 +88,17 @@ func main() {
 		log.Fatalf("passkey service: %v", err)
 	}
 
-	s := &server{priv: priv, pub: pub, sandboxMint: sandboxMint, store: st, passkeys: pk}
+	// Enrolment is open only in a sandbox environment. Everywhere else a passkey
+	// can be registered only with an operator-provisioned enrolment token, so an
+	// attacker cannot register a credential against a seeded operator subject.
+	enrolmentOpen := environment == "local" || environment == "sandbox"
+	if enrolmentOpen {
+		log.Printf("WARNING: open passkey enrolment (sandbox). Any subject may register a passkey.")
+	} else {
+		log.Printf("passkey enrolment requires an operator-provisioned enrolment token")
+	}
+
+	s := &server{priv: priv, pub: pub, sandboxMint: sandboxMint, enrolmentOpen: enrolmentOpen, store: st, passkeys: pk}
 
 	log.Printf("EPHERA identity-access on %s (env %s)", httpAddr, environment)
 	log.Printf("authorisation public key: %s", hex.EncodeToString(pub))
@@ -99,6 +113,7 @@ func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /v1/keys", s.keys)
+	mux.HandleFunc("POST /v1/enrolment/token", s.issueEnrolmentToken)
 	mux.HandleFunc("POST /v1/passkeys/register/begin", s.passkeyRegisterBegin)
 	mux.HandleFunc("POST /v1/passkeys/register/finish", s.passkeyRegisterFinish)
 	mux.HandleFunc("POST /v1/grants/challenge", s.grantChallenge)

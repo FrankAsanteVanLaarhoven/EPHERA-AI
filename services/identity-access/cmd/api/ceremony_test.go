@@ -35,6 +35,7 @@ const (
 
 type harness struct {
 	srv     *httptest.Server
+	s       *server
 	pub     ed25519.PublicKey
 	store   *store.Store
 	subject string
@@ -60,12 +61,14 @@ func newHarness(t *testing.T, sandboxMint bool) *harness {
 	if err != nil {
 		t.Fatalf("passkey service: %v", err)
 	}
-	s := &server{priv: priv, pub: pub, sandboxMint: sandboxMint, store: st, passkeys: pk}
+	// These tests exercise the ceremony itself, so they run with sandbox-open
+	// enrolment. The enrolment gate is covered separately in enrolment_test.go.
+	s := &server{priv: priv, pub: pub, sandboxMint: sandboxMint, enrolmentOpen: true, store: st, passkeys: pk}
 	srv := httptest.NewServer(s.routes())
 	t.Cleanup(srv.Close)
 
 	// A fresh subject per test so runs do not interfere.
-	return &harness{srv: srv, pub: pub, store: st, subject: "test:" + uuid.NewString() + ":GHS"}
+	return &harness{srv: srv, s: s, pub: pub, store: st, subject: "test:" + uuid.NewString() + ":GHS"}
 }
 
 func (h *harness) post(t *testing.T, path string, body any) (int, map[string]any) {
