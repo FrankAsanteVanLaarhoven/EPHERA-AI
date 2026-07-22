@@ -163,3 +163,19 @@ Grants minted this way are labelled `sandbox_authenticator` in the grant, in the
 ledger's grant table and in authorisation evidence. That label is the honest
 statement of what they prove: the transaction was bound and not replayed, not
 that a human approved it.
+
+## Ledger caller authentication
+
+The ledger authenticates every caller. `/health` is the only open route.
+
+- Platform services present `X-Ephera-Service-Token`, matched in constant time
+  against `LEDGER_SERVICE_TOKEN`. The run scripts set a sandbox value.
+- Operators present a session on the `/v1/operator/...` routes.
+- With no token configured the ledger refuses service calls rather than
+  accepting anyone, so a missing environment variable fails closed.
+
+The ledger serves no CORS headers and is not browser-facing: customer surfaces
+go through the payment orchestrator, operators through the control plane.
+
+The shared token is a **sandbox placeholder**. Real service identity is mutual
+TLS or workload identity, which this codebase cannot provide — that is G8.

@@ -8,17 +8,24 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 )
 
 type Client struct {
 	base   string
+	token  string
 	client *http.Client
 }
 
+// New builds a ledger client. The service token identifies this service to the
+// ledger, which authenticates every caller (D-02). It is read from the
+// environment rather than passed around, so it cannot end up in a log line or a
+// workflow input.
 func New(base string) *Client {
 	return &Client{
-		base: base,
+		base:  base,
+		token: os.Getenv("LEDGER_SERVICE_TOKEN"),
 		client: &http.Client{
 			Timeout: 15 * time.Second,
 		},
@@ -98,6 +105,9 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		req.Header.Set("X-Ephera-Service-Token", c.token)
 	}
 	res, err := c.client.Do(req)
 	if err != nil {

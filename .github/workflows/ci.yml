@@ -100,6 +100,7 @@ jobs:
     env:
       LEDGER_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5433/ephera_ledger?sslmode=disable
       LEDGER_TEST_DATABASE_URL: postgres://ephera:ephera_dev_only@localhost:5433/ephera_ledger?sslmode=disable
+      LEDGER_SERVICE_TOKEN: ci-service-token
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

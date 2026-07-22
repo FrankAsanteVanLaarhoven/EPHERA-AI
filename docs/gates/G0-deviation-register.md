@@ -67,11 +67,11 @@ Partially addressed, decision open:
 | --- | --- | --- |
 | D-11 | S1 | The crate is now labelled in source and in continuous integration as specification that is **not** in the money path, and the misleading `test:ledger` script name now points at the real ledger tests. Whether to link it, keep it as specification, or retire it remains open |
 
-Everything else is unchanged from the G0 baseline. In particular **D-02 remains
-fully open**: the ledger still authenticates no caller and permits any origin.
-An anonymous caller can no longer forge or replay an authorisation, but it can
-still reach the service. Caller authentication and network policy are G2-C and
-G8.
+Closed after G4.
+
+| ID | Sev | State |
+| --- | --- | --- |
+| D-02 | S1 | **Closed.** The ledger authenticates every caller. Platform services present a token matched in constant time; operators present a session on the operator routes; `/health` is the only open route. With no token configured it refuses service calls rather than accepting anyone. The wildcard CORS is gone — the ledger is not browser-facing. This also shut a live hole the register had understated: the legacy freeze endpoints accepted any non-empty string, so an anonymous caller could freeze a customer's account. The shared token is a sandbox placeholder; real service identity is mutual TLS or workload identity (G8) |
 
 ## Register
 

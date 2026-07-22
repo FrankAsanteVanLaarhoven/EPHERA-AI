@@ -44,20 +44,39 @@ func main() {
 		log.Printf("authorisation grants verified against key %s...", pubHex[:16])
 	}
 
+	// Callers must authenticate (D-02). Without a service token the ledger
+	// refuses every service call rather than accepting anyone who can reach it.
+	if _, ok := loadServiceToken(); !ok {
+		log.Printf("WARNING: LEDGER_SERVICE_TOKEN is not set. " +
+			"Service calls will be refused until a caller credential is configured.")
+	} else {
+		log.Printf("service callers must present X-Ephera-Service-Token")
+	}
+
 	s := &server{st: st}
 	mux := http.NewServeMux()
+	// Health is the only unauthenticated route: it reveals nothing and a
+	// liveness probe cannot hold a credential.
 	mux.HandleFunc("GET /health", s.health)
-	mux.HandleFunc("GET /v1/accounts/{ref}", s.getAccount)
-	mux.HandleFunc("POST /v1/accounts/{ref}/freeze", s.freeze)
-	mux.HandleFunc("POST /v1/accounts/{ref}/unfreeze", s.unfreeze)
-	mux.HandleFunc("POST /v1/holds", s.hold)
-	mux.HandleFunc("POST /v1/holds/{id}/release", s.releaseHold)
-	mux.HandleFunc("POST /v1/transfers", s.transfer)
+
+	// Platform services.
+	mux.HandleFunc("GET /v1/accounts/{ref}", s.serviceOnly(s.getAccount))
+	mux.HandleFunc("POST /v1/accounts/{ref}/freeze", s.serviceOnly(s.freeze))
+	mux.HandleFunc("POST /v1/accounts/{ref}/unfreeze", s.serviceOnly(s.unfreeze))
+	mux.HandleFunc("POST /v1/holds", s.serviceOnly(s.hold))
+	mux.HandleFunc("POST /v1/holds/{id}/release", s.serviceOnly(s.releaseHold))
+	mux.HandleFunc("POST /v1/transfers", s.serviceOnly(s.transfer))
+
+	// Operators, authenticated by their own session.
 	mux.HandleFunc("POST /v1/operator/accounts/{ref}/freeze", s.operatorFreeze)
 	mux.HandleFunc("POST /v1/operator/accounts/{ref}/unfreeze", s.operatorUnfreeze)
 
 	log.Printf("EPHERA ledger API on %s", httpAddr)
-	if err := http.ListenAndServe(httpAddr, withCORS(mux)); err != nil {
+	// No CORS. The ledger is not a browser-facing service: customer surfaces go
+	// through the payment orchestrator, and operators through the control plane.
+	// The previous wildcard origin invited exactly the direct access this gate
+	// is closing.
+	if err := http.ListenAndServe(httpAddr, mux); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -234,18 +253,6 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func withCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
