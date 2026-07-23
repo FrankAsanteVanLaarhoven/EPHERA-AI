@@ -13,7 +13,7 @@
   <a href="https://github.com/FrankAsanteVanLaarhoven/EPHERA-AI/actions/workflows/ci.yml"><img src="https://github.com/FrankAsanteVanLaarhoven/EPHERA-AI/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/status-sandbox-0A7B6A?style=flat-square" alt="Sandbox" />
   <img src="https://img.shields.io/badge/platform-iOS%20%7C%20Android%20%7C%20PWA-1B4F9C?style=flat-square" alt="Platforms" />
-  <img src="https://img.shields.io/badge/license-proprietary-050B18?style=flat-square" alt="License" />
+  <img src="https://img.shields.io/badge/license-Apache%202.0-1B4F9C?style=flat-square" alt="License" />
 </p>
 
 <p align="center">
@@ -382,9 +382,13 @@ The consumer PWA already reserves an **Assets** surface so product messaging sta
 
 ## License
 
-**Proprietary** — all rights reserved until otherwise stated.
+Licensed under the [Apache License 2.0](LICENSE) — permissive, with an explicit
+patent grant. See [NOTICE](NOTICE) for attribution, [TRADEMARKS.md](TRADEMARKS.md)
+for use of the EPHERA name and brand, and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+for dependency licences. Report vulnerabilities via [SECURITY.md](SECURITY.md).
 
-© EPHERA. Unauthorised use, reproduction, or distribution of this software or brand assets is prohibited.
+The **code** is Apache-2.0. The **EPHERA name, logos, and brand assets** are not
+covered by that grant (Apache-2.0 §6) — see [TRADEMARKS.md](TRADEMARKS.md).
 
 ---
 

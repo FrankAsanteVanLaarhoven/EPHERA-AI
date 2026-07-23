@@ -1,6 +1,7 @@
 {
   "name": "@ephera/connect-layer",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "private": true,
   "description": "EPHERA open banking (Plaid-like), SWIFT, and connector security primitives",
   "main": "./src/index.ts",

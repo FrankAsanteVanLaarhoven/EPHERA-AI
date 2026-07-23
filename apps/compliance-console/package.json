@@ -1,8 +1,9 @@
 {
   "name": "@ephera/compliance-console",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "private": true,
-  "description": "EPHERA Super Admin Console \u2014 ops, analytics, feature control, providers, AI models",
+  "description": "EPHERA Super Admin Console — ops, analytics, feature control, providers, AI models",
   "scripts": {
     "dev": "next dev -p 3009 -H 0.0.0.0",
     "build": "next build",
