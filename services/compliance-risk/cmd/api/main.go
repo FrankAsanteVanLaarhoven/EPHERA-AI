@@ -24,7 +24,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ephera/compliance-risk/internal/detect"
@@ -64,14 +66,32 @@ func main() {
 	// (detect.MinPopulation): a situation from a small sample is a guess dressed
 	// as an alert. It is a singleton across subjects so it sees cross-payment
 	// clusters, not one subject at a time.
-	aware := detect.NewAwareness(detect.NewPopulation(), 12, 15*time.Minute, 3)
+	//
+	// The learned distribution is persisted across restarts when
+	// COMPLIANCE_AWARENESS_SNAPSHOT names a file, so a restart warm-starts from
+	// what an earlier run saw instead of a cold population where everything looks
+	// rare. It stays advisory either way (ADR 0004): it never changes an outcome.
+	snapshotPath := os.Getenv("COMPLIANCE_AWARENESS_SNAPSHOT")
+	aware := detect.NewAwareness(loadAwarenessPopulation(snapshotPath), 12, 15*time.Minute, 3)
 	aware.OnRare = func(sit detect.Situation) {
 		log.Printf("RARE-EVENT [%s] %s", sit.Priority, sit.Narrative)
 	}
 
+	appCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go persistAwareness(appCtx, snapshotPath, aware, snapshotInterval())
+
 	s := &server{store: st, serviceToken: token, awareness: aware}
+	srv := &http.Server{Addr: addr, Handler: s.routes()}
+	go func() {
+		<-appCtx.Done()
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutCtx)
+	}()
+
 	log.Printf("EPHERA compliance-risk on %s", addr)
-	if err := http.ListenAndServe(addr, s.routes()); err != nil {
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }

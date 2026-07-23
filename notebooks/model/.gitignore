@@ -1,0 +1,10 @@
+# The trained binary is content-addressed by the checksum in model_card.json and
+# rebuilt by export_model.py. It is not committed (workspace rule: model weights
+# are not committed without approval). The card and producer ARE committed.
+artifacts/*.joblib
+
+# Never commit raw data or run logs.
+*.csv
+*.csv.gz
+*.zip
+train.log

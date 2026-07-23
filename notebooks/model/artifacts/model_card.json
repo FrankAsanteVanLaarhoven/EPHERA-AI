@@ -1,0 +1,96 @@
+{
+  "name": "fraud-ieee-cis",
+  "version": "1.0.0",
+  "artifact_file": "fraud-ieee-cis-v1.0.0.joblib",
+  "artifact_sha256": "c4e6d6a1523b60f8abd5c16e94a7d50341d2030aba8b1e2796051448b9f5f664",
+  "created_by": "Frank Asante Van Laarhoven",
+  "purpose": "Research / methodology proxy for payment-risk scoring. Advisory only. NOT wired into any money-path service.",
+  "model_type": "HistGradientBoostingClassifier",
+  "hyperparameters": {
+    "max_iter": 300,
+    "learning_rate": 0.05,
+    "max_leaf_nodes": 63,
+    "l2_regularization": 1.0,
+    "class_weight": "balanced",
+    "early_stopping": true,
+    "validation_fraction": 0.1,
+    "seed": 42
+  },
+  "dataset": {
+    "name": "IEEE-CIS Fraud Detection (Kaggle)",
+    "source": "kaggle.com/competitions/ieee-fraud-detection",
+    "licence": "Kaggle competition rules; research use only",
+    "file": "train_transaction.csv",
+    "file_sha256": "3a5c83ab6b3cc13dcabe5ffa9f522307fd5f7f7b6e6f6a60c32284ca6283d642",
+    "rows": 590540,
+    "split": "temporal on TransactionDT; train earliest 80%, test latest 20%; encoders fit on train only"
+  },
+  "features": {
+    "numeric": [
+      "TransactionAmt",
+      "card1",
+      "card2",
+      "card3",
+      "card5",
+      "addr1",
+      "addr2",
+      "dist1",
+      "dist2",
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6",
+      "C7",
+      "C8",
+      "C9",
+      "C10",
+      "C11",
+      "C12",
+      "C13",
+      "C14",
+      "D1",
+      "D2",
+      "D3",
+      "D4",
+      "D5",
+      "D6",
+      "D7",
+      "D8",
+      "D9",
+      "D10",
+      "D11",
+      "D12",
+      "D13",
+      "D14",
+      "D15"
+    ],
+    "categorical": [
+      "ProductCD",
+      "card4",
+      "card6"
+    ]
+  },
+  "metrics": {
+    "roc_auc": 0.902162925719787,
+    "auprc": 0.48969006465867176,
+    "precision_at_1pct": 0.8602878916172735,
+    "precision_at_5pct": 0.3727349703640982,
+    "brier": 0.074071035852663,
+    "test_prevalence": 0.034409184813899145,
+    "n_iter": 300
+  },
+  "provenance": {
+    "sklearn_version": "1.9.0",
+    "numpy_version": "1.26.4",
+    "pandas_version": "3.0.2",
+    "python_version": "3.13.13",
+    "git_commit": "f24cedf546204d35e4428b9eaa20bf4468df191f"
+  },
+  "boundaries": {
+    "intended_use": "research proxy; threshold-recommendation experiments",
+    "non_intended_use": "live fraud blocking; production decisioning; any authorisation on the money path",
+    "not_third_party_audited": true
+  }
+}
